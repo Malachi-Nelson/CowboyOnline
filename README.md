@@ -4,6 +4,11 @@ A Wild West open world for the browser, built on the bones of [HoodWar](https://
 frontier, 1899, up to 64 players in one world on an authoritative server. This repository is at **Phase 2 of 11**:
 the networking foundation and a test range to try it on. There is no map, horse or gun yet.
 
+![A figure in a hat and pale coat sprinting across open grassland, with a connection readout and a radar](docs/screenshots/sprinting-with-150ms-ping.jpg)
+
+The pictures in `docs/screenshots/` come from a headless browser that draws in software, which is why the readout
+in them shows a few frames a second.
+
 ## What works today
 
 - An authoritative world server: 20 ticks a second, movement stepped at 60 Hz, one process per 64-player world.
@@ -21,7 +26,7 @@ Needs Node 22 or newer.
 
 ```sh
 npm install
-npm test                 # 30 unit and end-to-end tests
+npm test                 # unit and end-to-end tests
 npm run build            # writes client/dist/index.html, one self-contained page
 npm start                # the world server on :8080 (PORT, BOTS, SPAWN, ORIGINS in the environment)
 npm run loadtest         # 64 simulated players against a fresh server; add -- --quick for the 1-minute version

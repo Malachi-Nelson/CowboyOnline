@@ -65,7 +65,7 @@ function brain(rand, radius) {
 
 async function startServer(spawnMode) {
   if (URL_) return { url: URL_, http: URL_.replace(/^ws/, 'http'), stop() {} };
-  const child = spawn(process.execPath, [resolve(ROOT, 'server/src/node/main.js')], { env: { ...process.env, PORT: String(PORT), BOTS: String(BOTS), MAX_PLAYERS: String(MAXP), SPAWN: spawnMode, ALLOW_RESET: '1' }, stdio: ['ignore', 'ignore', 'inherit'] });
+  const child = spawn(process.execPath, [...(flag('gc-at-end') ? ['--expose-gc'] : []), resolve(ROOT, 'server/src/node/main.js')], { env: { ...process.env, PORT: String(PORT), BOTS: String(BOTS), MAX_PLAYERS: String(MAXP), SPAWN: spawnMode, ALLOW_RESET: '1' }, stdio: ['ignore', 'ignore', 'inherit'] });
   const http = `http://127.0.0.1:${PORT}`;
   for (let i = 0; i < 100; i++) { try { if ((await fetch(http + '/health')).ok) break; } catch (e) { /* not up yet */ } await sleep(50); }
   return { url: `ws://127.0.0.1:${PORT}`, http, stop: () => new Promise(r => { child.once('exit', r); child.kill('SIGTERM'); }) };
@@ -95,19 +95,20 @@ async function scenario(name, seconds, soak) {
   // ---- measure
   if (!URL_) await fetch(server.http + '/reset-metrics');
   for (const s of sessions) { const st = s.stats; st.errN = 0; st.errMax = 0; st.errHist.fill(0); st.corrections = 0; st.lateFrames = 0; st.entFrames = 0; st.snapMax = 0; s.lastIn = st.bytesIn; s.lastOut = st.bytesOut; s.startIn = st.bytesIn; s.startOut = st.bytesOut; s.startSnap = st.snapshots; }
-  const first = await status(), t0 = performance.now(), series = [], viewErr = { near: [], mid: [], far: [] }, pending = [], viewN = [];
+  // the clock starts at the same instant as the counters; anything awaited comes after
+  const t0 = performance.now(), series = [], viewErr = { near: [], mid: [], far: [] }, pending = [], viewN = [];
+  const first = await status(), tFirst = performance.now();
   const sample = (id, t) => {                                    // where the server really had entity `id` at server time t
     const s = byId.get(id); if (!s) return null;
     const tk = t / TICK_MS, a = Math.floor(tk), f = tk - a, i = a % TRUTH, j = (a + 1) % TRUTH;
     if (s.truthTick[i] !== a || s.truthTick[j] !== a + 1) return null;
     const p = s.truth; return [p[i * 3] + (p[j * 3] - p[i * 3]) * f, p[i * 3 + 2] + (p[j * 3 + 2] - p[i * 3 + 2]) * f];
   };
-  let second = 0;
+  let lastSecond = t0;
   const every = setInterval(() => {
-    second++;
-    const now = performance.now();
+    const now = performance.now(), span = (now - lastSecond) / 1000; lastSecond = now;     // the timer can fire late: count by the time that really passed
     for (const s of sessions) {
-      const st = s.stats, din = st.bytesIn - s.lastIn, dout = st.bytesOut - s.lastOut;
+      const st = s.stats, din = Math.round((st.bytesIn - s.lastIn) / span), dout = Math.round((st.bytesOut - s.lastOut) / span);
       if (din > s.peakIn) s.peakIn = din; if (dout > s.peakOut) s.peakOut = dout; s.lastIn = st.bytesIn; s.lastOut = st.bytesOut;
       // note how three of the players this one can see are drawn right now; checked against the truth a little later
       s.frame(now);
@@ -120,35 +121,44 @@ async function scenario(name, seconds, soak) {
     }
     let v = 0; for (const s of sessions) v += s.ents.size; viewN.push(v / sessions.length);
   }, 1000);
-  const poll = setInterval(async () => { try { const st = await status(); series.push({ t: Math.round((performance.now() - t0) / 1000), rssMB: st.process.rssMB, heapMB: st.process.heapMB, cpuMs: st.process.cpuMs, p99: st.tickMs.p99 }); if (soak && series.length % 6 === 0) console.log(`   ${String(series.at(-1).t).padStart(5)} s  rss ${st.process.rssMB} MB  heap ${st.process.heapMB} MB  tick p99 ${st.tickMs.p99} ms`); } catch (e) { /* server busy */ } }, soak ? 10000 : 2000);
+  const poll = setInterval(async () => { try { const st = await status(); series.push({ t: Math.round((performance.now() - t0) / 1000), rssMB: st.process.rssMB, heapMB: st.process.heapMB, heapTotalMB: st.process.heapTotalMB, externalMB: st.process.externalMB, arrayBuffersMB: st.process.arrayBuffersMB, cpuMs: st.process.cpuMs, p99: st.tickMs.p99 }); if (soak && series.length % 6 === 0) console.log(`   ${String(series.at(-1).t).padStart(5)} s  rss ${st.process.rssMB} MB  heap ${st.process.heapMB} of ${st.process.heapTotalMB} MB  external ${st.process.externalMB} MB  tick p99 ${st.tickMs.p99} ms`); } catch (e) { /* server busy */ } }, soak ? 10000 : 2000);
   await sleep(seconds * 1000);
   clearInterval(every); clearInterval(poll);
-  const last = await status(), wall = (performance.now() - t0) / 1000;
+  const wall = (performance.now() - t0) / 1000;
+  for (const s of sessions) { s.endIn = s.stats.bytesIn; s.endOut = s.stats.bytesOut; s.endSnap = s.stats.snapshots; }
+  const last = await status(), cpuWall = (performance.now() - tFirst) / 1000;
+  // with --gc-at-end: ask the server for a full collection and look again, to tell memory that is merely waiting
+  // to be collected from memory that is being held on to
+  let afterGc = null;
+  if (flag('gc-at-end') && !URL_) { await fetch(server.http + '/gc'); await sleep(1500); await fetch(server.http + '/gc'); await sleep(1500); const g = (await status()).process; afterGc = { rssMB: g.rssMB, heapMB: g.heapMB, heapTotalMB: g.heapTotalMB, externalMB: g.externalMB }; }
 
   // ---- add it up
-  const down = sessions.map(s => (s.stats.bytesIn - s.startIn) / wall).sort((a, b) => a - b), up = sessions.map(s => (s.stats.bytesOut - s.startOut) / wall).sort((a, b) => a - b);
+  const down = sessions.map(s => (s.endIn - s.startIn) / wall).sort((a, b) => a - b), up = sessions.map(s => (s.endOut - s.startOut) / wall).sort((a, b) => a - b);
   const hist = new Array(6).fill(0); let corrections = 0, errMax = 0, late = 0, entFrames = 0, unknown = 0, errs = [], snapMax = 0, snaps = 0, rtt = 0;
-  for (const s of sessions) { const st = s.stats; for (let i = 0; i < 6; i++) hist[i] += st.errHist[i]; corrections += st.corrections; if (st.errMax > errMax) errMax = st.errMax; late += st.lateFrames; entFrames += st.entFrames; unknown += st.unknown; if (st.snapMax > snapMax) snapMax = st.snapMax; snaps += st.snapshots - s.startSnap; rtt += s.rtt; const n = Math.min(st.errN, 8192); for (let i = 0; i < n; i++) errs.push(st.errs[i]); }
+  for (const s of sessions) { const st = s.stats; for (let i = 0; i < 6; i++) hist[i] += st.errHist[i]; corrections += st.corrections; if (st.errMax > errMax) errMax = st.errMax; late += st.lateFrames; entFrames += st.entFrames; unknown += st.unknown; if (st.snapMax > snapMax) snapMax = st.snapMax; snaps += s.endSnap - s.startSnap; rtt += s.rtt; const n = Math.min(st.errN, 8192); for (let i = 0; i < n; i++) errs.push(st.errs[i]); }
   errs.sort((a, b) => a - b);
   const ve = k => { const a = viewErr[k].sort((p, q) => p - q); return { n: a.length, p50cm: r1(pct(a, 0.5) * 100), p99cm: r1(pct(a, 0.99) * 100), maxCm: r1((a.at(-1) || 0) * 100) }; };
-  const cpu = URL_ ? null : (last.process.cpuMs - first.process.cpuMs) / (wall * 10), stillPlaying = sessions.filter(s => s.state === 'playing').length;
+  const cpu = URL_ ? null : (last.process.cpuMs - first.process.cpuMs) / (cpuWall * 10), stillPlaying = sessions.filter(s => s.state === 'playing').length;
   const afterWarm = series.filter(p => p.t >= Math.min(300, seconds / 3)), rssGrow = afterWarm.length > 1 ? afterWarm.at(-1).rssMB - afterWarm[0].rssMB : 0, heapGrow = afterWarm.length > 1 ? afterWarm.at(-1).heapMB - afterWarm[0].heapMB : 0;
   const res = {
     scenario: name, about: sc.text, players: N, bots: BOTS, playing: stillPlaying, seconds: Math.round(wall), pingMs: PING, jitterMs: JITTER, measuredPingMs: Math.round(rtt / sessions.length),
     server: { tickMs: last.tickMs, cpuPercentOfOneCore: cpu === null ? null : r1(cpu), cpuPercentPerPlayer: cpu === null ? null : r3(cpu / N), rssMB: last.process.rssMB, heapMB: last.process.heapMB, rssGrowthMB: r1(rssGrow), heapGrowthMB: r1(heapGrow), biggestSnapshotBytes: last.totals.biggestSnapshot, snapshotsSkipped: last.totals.snapshotsSkipped, inputsDropped: last.totals.inputsDropped, viewDelayMs: last.viewDelayMs },
     perPlayer: {
-      downBytesPerS: { avg: Math.round(down.reduce((a, b) => a + b, 0) / N), max: Math.round(down.at(-1)), peakSecond: Math.max(...sessions.map(s => s.peakIn)) },
-      upBytesPerS: { avg: Math.round(up.reduce((a, b) => a + b, 0) / N), max: Math.round(up.at(-1)), peakSecond: Math.max(...sessions.map(s => s.peakOut)) },
+      downBytesPerS: { avg: Math.round(down.reduce((a, b) => a + b, 0) / N), max: Math.round(down.at(-1)), peakSecond: Math.max(...sessions.map(s => s.peakIn)), peakSecondCountedByServer: last.bytesPerSecond.outPeak },
+      upBytesPerS: { avg: Math.round(up.reduce((a, b) => a + b, 0) / N), max: Math.round(up.at(-1)), peakSecond: Math.max(...sessions.map(s => s.peakOut)), peakSecondCountedByServer: last.bytesPerSecond.inPeak },
       snapshotsPerS: r1(snaps / N / wall), inView: { avg: r1(viewN.reduce((a, b) => a + b, 0) / (viewN.length || 1)), max: Math.max(...sessions.map(s => s.ents.size)) },
     },
     prediction: { samples: errs.length, p50mm: r3(pct(errs, 0.5) * 1000), p99mm: r3(pct(errs, 0.99) * 1000), p999mm: r3(pct(errs, 0.999) * 1000), maxMm: r3(errMax * 1000), corrections, over1cm: hist[2] + hist[3] + hist[4] + hist[5], over10cm: hist[4] + hist[5] },
     othersDrawn: { within60m: ve('near'), to150m: ve('mid'), beyond: ve('far'), framesWaitingForAnUpdatePercent: r3(late / (entFrames || 1) * 100), unknownUpdates: unknown },
-    memorySeries: soak ? series.map(p => [p.t, p.rssMB, p.heapMB]) : undefined,
+    memorySeries: soak ? series.map(p => [p.t, p.rssMB, p.heapMB, p.heapTotalMB, p.externalMB]) : undefined,
+    memoryAtEnd: { rssMB: last.process.rssMB, heapMB: last.process.heapMB, heapTotalMB: last.process.heapTotalMB, externalMB: last.process.externalMB }, memoryAfterFullCollection: afterGc || undefined,
   };
   const gates = [
     ['server tick p99 <= 25 ms', last.tickMs.p99 <= 25, `${last.tickMs.p99} ms (max ${last.tickMs.max} ms)`],
-    ['no player sent more than 16 KB in a second', res.perPlayer.downBytesPerS.peakSecond <= 16384, `${res.perPlayer.downBytesPerS.peakSecond} bytes`],
-    ['no player sends more than 2 KB a second', res.perPlayer.upBytesPerS.peakSecond <= 2048, `${res.perPlayer.upBytesPerS.peakSecond} bytes`],
+    // The server counts what it sends in each second of its own ticks, which is exact. The players' own count is
+    // shown too, but their one-second timer drifts when the test machine is busy.
+    ['no player sent more than 16 KB in a second', last.bytesPerSecond.outPeak <= 16384, `${last.bytesPerSecond.outPeak} bytes by the server's count, ${res.perPlayer.downBytesPerS.peakSecond} by the players'`],
+    ['no player sends more than 2 KB a second', last.bytesPerSecond.inPeak <= 2048, `${last.bytesPerSecond.inPeak} bytes by the server's count, ${res.perPlayer.upBytesPerS.peakSecond} by the players'`],
     ['prediction within 10 cm', errMax < 0.1, `largest ${res.prediction.maxMm} mm over ${errs.length} snapshots`],
     ['everyone stayed connected', stillPlaying === N, `${stillPlaying} of ${N}`],
     ['no update for an unknown entity', unknown === 0, String(unknown)],
@@ -162,6 +172,7 @@ async function scenario(name, seconds, soak) {
   console.log(`   in view  avg ${res.perPlayer.inView.avg}, most ${res.perPlayer.inView.max}; ${res.perPlayer.snapshotsPerS} snapshots/s each; others seen ${last.viewDelayMs} ms in the past`);
   console.log(`   predict  p50 ${res.prediction.p50mm} mm, p99 ${res.prediction.p99mm} mm, max ${res.prediction.maxMm} mm; ${corrections} corrections in ${errs.length} snapshots`);
   console.log(`   others   <60 m: p50 ${res.othersDrawn.within60m.p50cm} cm, p99 ${res.othersDrawn.within60m.p99cm} cm (${res.othersDrawn.within60m.n});  60-150 m: p99 ${res.othersDrawn.to150m.p99cm} cm (${res.othersDrawn.to150m.n});  beyond: p99 ${res.othersDrawn.beyond.p99cm} cm (${res.othersDrawn.beyond.n});  waiting ${res.othersDrawn.framesWaitingForAnUpdatePercent}% of frames`);
+  if (afterGc) console.log(`   memory   at the end: rss ${last.process.rssMB} MB, heap ${last.process.heapMB} of ${last.process.heapTotalMB} MB, external ${last.process.externalMB} MB;  after a full collection: rss ${afterGc.rssMB} MB, heap ${afterGc.heapMB} of ${afterGc.heapTotalMB} MB, external ${afterGc.externalMB} MB`);
   for (const g of res.gates) console.log(`   ${g.ok ? 'PASS' : 'FAIL'}  ${g.what}: ${g.got}`);
 
   clearInterval(loop);

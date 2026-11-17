@@ -1,5 +1,5 @@
 <div id="app">
-<canvas id="view" aria-label="The test range, seen from behind your character"></canvas>
+<canvas id="view" tabindex="0" aria-label="The test range, seen from behind your character"></canvas>
 <div id="tags" aria-hidden="true"></div>
 
 <div id="hud" hidden>
@@ -33,7 +33,7 @@
     <figcaption>Updates a second, by range: <span class="k near">20</span><span class="k mid">10</span><span class="k far">5</span><span class="k edge">2</span></figcaption>
   </figure>
 
-  <p id="hint"><span class="keys-only">W A S D to move · mouse to look · Shift to sprint · Space to jump</span><span class="touch-only">Left thumb moves · right thumb looks</span></p>
+  <p id="hint"><span class="keys-only">W A S D to move · <span class="lock-only">mouse to look</span><span class="drag-only">hold the mouse button and drag to look</span> · Shift to sprint · Space to jump</span><span class="touch-only">Left thumb moves · right thumb looks</span></p>
   <p id="pace" aria-live="off">Standing</p>
 
   <div id="stick" hidden><i></i></div>
@@ -52,6 +52,7 @@
         <button id="play" type="submit" class="primary">Walk in</button>
       </div>
     </form>
+    <label class="check" for="sound"><input id="sound" name="sound" type="checkbox" checked> Footsteps (sound)</label>
     <p id="status" role="status"></p>
 
     <h2>Three things to try</h2>
@@ -64,7 +65,7 @@
     <h2>Controls</h2>
     <dl class="keys">
       <div class="keys-only"><dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt><dd>Move</dd></div>
-      <div class="keys-only"><dt>Mouse</dt><dd>Look</dd></div>
+      <div class="keys-only"><dt>Mouse</dt><dd>Look. If the pointer is not captured, hold the button and drag.</dd></div>
       <div class="keys-only"><dt><kbd>Shift</kbd></dt><dd>Sprint</dd></div>
       <div class="keys-only"><dt><kbd>Space</kbd></dt><dd>Jump</dd></div>
       <div class="keys-only"><dt><kbd>Z</kbd></dt><dd>Hold a walking pace</dd></div>

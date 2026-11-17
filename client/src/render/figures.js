@@ -63,14 +63,21 @@ export function createFigures(scene, field, max = 96) {
   let n = 0, ox = 0, oz = 0;
 
   // one person: a = their animation state { phase, yaw, speed, roll, init }
+  let sound = null, earX = 0, earZ = 0;
   function put(a, x, y, z, yawWant, speedNow, grounded, color, dt) {
     if (n >= max) return;
-    if (!a.init) { a.init = true; a.phase = (x * 7.3 + z * 3.1) % 6.28; a.yaw = yawWant; a.speed = speedNow; a.roll = 0; }
+    if (!a.init) { a.init = true; a.phase = (x * 7.3 + z * 3.1) % 6.28; a.yaw = yawWant; a.speed = speedNow; a.roll = 0; a.air = !grounded; }
     const turn = angTo(a.yaw, yawWant), k = 1 - Math.exp(-dt * 12);
     a.yaw += turn * k; a.speed += (speedNow - a.speed) * (1 - Math.exp(-dt * 9));
     a.roll += (Math.max(-0.22, Math.min(0.22, turn * a.speed * 0.09)) - a.roll) * (1 - Math.exp(-dt * 8));
     const sp = a.speed, moving = sp > 0.15;
+    const was = Math.cos(a.phase);
     if (moving && grounded) a.phase += sp * dt * Math.PI / (0.55 + 0.16 * sp);
+    if (sound) {                                                   // a foot lands at the end of each swing, where the body is lowest
+      const d = Math.hypot(x - earX, z - earZ);
+      if (d < 40) { if (a.air && grounded) sound.land(d); else if (moving && grounded && was * Math.cos(a.phase) < 0) sound.step(sp, d); }
+    }
+    a.air = !grounded;
     const amp = grounded ? (moving ? Math.min(0.95, 0.22 + 0.11 * sp) : 0) : 0.5, sw = Math.sin(a.phase);
     const bob = grounded && moving ? Math.abs(Math.cos(a.phase)) * 0.045 * Math.min(1, sp / 3) : 0, lean = Math.min(0.24, sp * 0.034);
     const lx = x - ox, lz = z - oz;
@@ -101,9 +108,11 @@ export function createFigures(scene, field, max = 96) {
   const self = {};
   return {
     count: () => n,
+    setField(f) { field = f; },                                    // a world from another seed has other ground
     // draw everyone the session knows about, and the player
-    update(session, dt, bandTint, selfVisible) {
+    update(session, dt, bandTint, selfVisible, steps) {
       n = 0; ox = Math.round(session.x); oz = Math.round(session.z);
+      sound = steps || null; earX = session.x; earZ = session.z; if (sound) sound.frame();
       for (const m of [coats, heads, legs, shades]) m.position.set(ox, 0, oz);
       const me = session.me;
       if (selfVisible) {

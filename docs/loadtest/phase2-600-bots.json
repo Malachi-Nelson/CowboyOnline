@@ -1,0 +1,134 @@
+{
+ "when": "2026-11-17T16:19:15.682Z",
+ "node": "v22.23.4",
+ "machine": "Intel(R) Xeon(R) Processor @ 2.10GHz x2, 8 GB",
+ "note": "The players run in the same machine as the server and take CPU from it, so server timings here are pessimistic.",
+ "results": [
+  {
+   "scenario": "town",
+   "about": "everyone within 200 m of the hub: a busy town",
+   "players": 64,
+   "bots": 600,
+   "playing": 64,
+   "seconds": 60,
+   "pingMs": 150,
+   "jitterMs": 20,
+   "measuredPingMs": 190,
+   "server": {
+    "tickMs": {
+     "n": 1201,
+     "avg": 8.322,
+     "p50": 8.048,
+     "p95": 11.145,
+     "p99": 14.346,
+     "max": 27.772
+    },
+    "cpuPercentOfOneCore": 20.1,
+    "cpuPercentPerPlayer": 0.313,
+    "rssMB": 119.4,
+    "heapMB": 19.4,
+    "rssGrowthMB": 1.8,
+    "heapGrowthMB": 1,
+    "biggestSnapshotBytes": 784,
+    "snapshotsSkipped": 0,
+    "inputsDropped": 0,
+    "viewDelayMs": 281
+   },
+   "perPlayer": {
+    "downBytesPerS": {
+     "avg": 15670,
+     "max": 15683,
+     "peakSecond": 16486,
+     "peakSecondCountedByServer": 15694
+    },
+    "upBytesPerS": {
+     "avg": 555,
+     "max": 555,
+     "peakSecond": 582,
+     "peakSecondCountedByServer": 609
+    },
+    "snapshotsPerS": 20,
+    "inView": {
+     "avg": 565.3,
+     "max": 651
+    }
+   },
+   "prediction": {
+    "samples": 80778,
+    "p50mm": 0,
+    "p99mm": 0,
+    "p999mm": 0,
+    "maxMm": 0,
+    "corrections": 0,
+    "over1cm": 0,
+    "over10cm": 0
+   },
+   "othersDrawn": {
+    "within60m": {
+     "n": 362,
+     "p50cm": 1,
+     "p99cm": 2,
+     "maxCm": 3.7
+    },
+    "to150m": {
+     "n": 663,
+     "p50cm": 1,
+     "p99cm": 5.4,
+     "maxCm": 9.3
+    },
+    "beyond": {
+     "n": 239,
+     "p50cm": 1.1,
+     "p99cm": 12.6,
+     "maxCm": 18.8
+    },
+    "framesWaitingForAnUpdatePercent": 0.509,
+    "unknownUpdates": 0
+   },
+   "memoryAtEnd": {
+    "rssMB": 119.4,
+    "heapMB": 19.4,
+    "heapTotalMB": 52.4,
+    "externalMB": 9.4
+   },
+   "memoryAfterFullCollection": {
+    "rssMB": 119.5,
+    "heapMB": 24,
+    "heapTotalMB": 52.6,
+    "externalMB": 8.6
+   },
+   "gates": [
+    {
+     "what": "server tick p99 <= 25 ms",
+     "ok": true,
+     "got": "14.346 ms (max 27.772 ms)"
+    },
+    {
+     "what": "no player sent more than 16 KB in a second",
+     "ok": true,
+     "got": "15694 bytes by the server's count, 16486 by the players'"
+    },
+    {
+     "what": "no player sends more than 2 KB a second",
+     "ok": true,
+     "got": "609 bytes by the server's count, 582 by the players'"
+    },
+    {
+     "what": "prediction within 10 cm",
+     "ok": true,
+     "got": "largest 0 mm over 80778 snapshots"
+    },
+    {
+     "what": "everyone stayed connected",
+     "ok": true,
+     "got": "64 of 64"
+    },
+    {
+     "what": "no update for an unknown entity",
+     "ok": true,
+     "got": "0"
+    }
+   ]
+  }
+ ]
+}

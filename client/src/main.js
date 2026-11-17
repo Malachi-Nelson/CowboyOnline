@@ -13,6 +13,7 @@ import { createFigures } from './render/figures.js';
 import { createCamera } from './player/camera.js';
 import { createControls } from './input/controls.js';
 import { createHud } from './ui/hud.js';
+import { createSteps } from './audio/steps.js';
 import { Session } from './net/session.js';
 import { WsTransport, LagTransport } from './net/transport.js';
 import { LocalTransport } from './net/local.js';
@@ -25,8 +26,8 @@ const coarse = matchMedia('(pointer: coarse)').matches, still = matchMedia('(pre
 if (coarse) document.documentElement.classList.add('touch');
 
 const store = createStore({ mode: 'menu', showStats: true, lag: 0, bandTint: false, grid: true, locked: false });
-const view = createScene(canvas), controls = createControls(canvas, store), hud = createHud(store);
-const LAGS = [0, 60, 150, 300];
+const view = createScene(canvas), controls = createControls(canvas, store), hud = createHud(store), steps = createSteps();
+const LAGS = [0, 150, 300];
 let session = null, lagT = null, inner = null, local = null;       // local: the world in this tab, when that is what we are in
 let field = null, ground = null, props = null, figures = null, camera = null, seedBuilt = -1;
 
@@ -45,7 +46,7 @@ function connect(url) {
       for (const m of [ground && ground.mesh, props]) if (m) view.scene.remove(m);
       field = s.field; seedBuilt = o.seed;
       ground = createGround(view.scene, field); props = createProps(view.scene, field);
-      if (!figures) figures = createFigures(view.scene, field);
+      if (!figures) figures = createFigures(view.scene, field); else figures.setField(field);
       camera = createCamera(field); size();
     }
     controls.intent.yaw = Math.atan2(o.x - HUB_X, o.z - HUB_Z) + Math.PI; // start out facing the hub
@@ -64,16 +65,19 @@ function size() { const [w, h] = view.resize(); if (camera) camera.resize(w, h);
 addEventListener('resize', size);
 
 // ---- the title card
-const nameBox = $('name'), serverBox = $('server');
-nameBox.value = saved.get('name', '');
+const nameBox = $('name'), serverBox = $('server'), soundBox = $('sound');
+nameBox.value = saved.get('name', ''); soundBox.checked = saved.get('sound', true) !== false;
 $('join').hidden = hosted; $('joinNote').hidden = !hosted;
 const params = new URLSearchParams(location.search), preset = params.get('server') || '';
 if (preset) serverBox.value = preset;
 function setName() { const n = nameBox.value.replace(/[^\w \-]/g, '').trim().slice(0, 14); if (n !== saved.get('name', '')) { saved.set('name', n); return true; } return false; }
 function play() {
   store.set({ mode: 'play' });
+  steps.enabled = soundBox.checked; saved.set('sound', soundBox.checked); steps.start();
   canvas.focus();
   if (!coarse && canvas.requestPointerLock) { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (e) { /* drag to look instead */ } }
+  // some pages (a preview frame, for one) are not allowed to capture the pointer; say how to look around there
+  if (!coarse) setTimeout(() => document.documentElement.classList.toggle('drag', !store.state.locked), 500);
 }
 $('enter').addEventListener('submit', e => {
   e.preventDefault();
@@ -98,7 +102,7 @@ store.on((s, p) => {
   if ('lag' in p && lagT) { lagT.lag = s.lag / 2; lagT.jitter = s.lag * 0.12; hud.resetWorst(); }
   if ('grid' in p && ground) ground.uni.uGrid.value = s.grid ? 1 : 0;
   if ('locked' in p && !s.locked && s.mode === 'play' && !coarse && wasLocked) store.set({ mode: 'menu' });   // Esc let go of the mouse
-  if ('locked' in p) wasLocked = s.locked;
+  if ('locked' in p) { wasLocked = s.locked; if (s.locked) document.documentElement.classList.remove('drag'); }
 });
 let wasLocked = false;
 addEventListener('keydown', e => {
@@ -138,7 +142,7 @@ function frame() {
   if (playing) camera.follow(session.x, session.y, session.z, i.yaw, i.pitch, Math.hypot(me.vx, me.vz), dt);
   else camera.circle(HUB_X, field.base, HUB_Z, still ? 0 : dt);
   ground.update(playing ? session.x : HUB_X, playing ? session.z : HUB_Z, camera.cam.position);
-  figures.update(session, dt, store.state.bandTint, true);
+  figures.update(session, dt, store.state.bandTint, true, playing ? steps : null);
   view.render(camera.cam);
   if (playing) {
     hud.stats(session, now, local ? local.total : 0, store.state.lag);

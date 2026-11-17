@@ -26,6 +26,9 @@ body { margin: 0; background: var(--ground); color: var(--ink); font: 400 15px/1
 button, input { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
 kbd { font: 600 0.78em/1 var(--text); padding: 0.28em 0.5em; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; background: rgba(239, 230, 210, 0.06); white-space: nowrap; }
+.drag-only { display: none; }
+.drag .drag-only { display: inline; } .drag .lock-only { display: none; }
+.drag #view { cursor: grab; } .drag #view:active { cursor: grabbing; }
 .touch-only { display: none !important; }
 .touch .touch-only { display: revert !important; } .touch .keys-only { display: none !important; }
 .touch .keys > .touch-only { display: flex !important; }
@@ -89,6 +92,8 @@ input::placeholder { color: var(--dim); opacity: 0.75; }
 .row button.primary { background: var(--brass); color: var(--brass-ink); }
 .row button:hover { filter: brightness(1.1); }
 .row button:disabled { opacity: 0.55; cursor: default; }
+.check { display: flex; align-items: center; gap: 8px; width: fit-content; color: var(--ink); cursor: pointer; }
+.check input { flex: none; width: 1rem; height: 1rem; min-width: 0; padding: 0; accent-color: var(--brass); }
 #status { margin: 0; min-height: 1.4em; font-size: 0.85rem; color: var(--warn); }
 #status:empty { display: none; }
 .try { margin: 0; padding-left: 1.1rem; display: grid; gap: 6px; max-width: 62ch; }

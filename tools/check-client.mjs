@@ -44,11 +44,11 @@ const base = await page.evaluate(() => { const st = __ct.session.stats; st.errMa
 if (phone) {
   await touch('touchStart', [{ x: 90, y: 620, id: 1 }]); await touch('touchMove', [{ x: 90, y: 556, id: 1 }]); await wait(2500);
   await touch('touchStart', [{ x: 90, y: 556, id: 1 }, { x: 300, y: 400, id: 2 }]); await touch('touchMove', [{ x: 90, y: 556, id: 1 }, { x: 240, y: 410, id: 2 }]); await wait(1500);
-  await page.tap('#bPing'); await page.tap('#bPing'); await wait(3500);
+  await page.tap('#bPing'); await wait(3500);
 } else {
   await page.keyboard.down('KeyW'); await page.keyboard.down('ShiftLeft'); await wait(2500);
   await page.keyboard.down('KeyA'); await wait(700); await page.keyboard.up('KeyA'); await page.keyboard.press('Space'); await wait(600);
-  await page.keyboard.press('KeyL'); await page.keyboard.press('KeyL');                        // 150 ms of ping
+  await page.keyboard.press('KeyL');                                                           // 150 ms of ping
   await page.mouse.move(640, 360); await page.mouse.down(); await page.mouse.move(520, 372, { steps: 12 }); await page.mouse.up();
   await wait(3500); await page.keyboard.press('Space'); await wait(500);
 }

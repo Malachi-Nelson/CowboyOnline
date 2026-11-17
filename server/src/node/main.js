@@ -25,10 +25,11 @@ const server = http.createServer((req, res) => {
   if (path === '/status') {
     const cpu = process.cpuUsage(), mem = process.memoryUsage();
     res.writeHead(200, { ...head, 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ...world.status(), process: { node: process.version, upS: Math.round((Date.now() - started) / 1000), rssMB: Math.round(mem.rss / 1048576 * 10) / 10, heapMB: Math.round(mem.heapUsed / 1048576 * 10) / 10, cpuMs: Math.round((cpu.user + cpu.system) / 1000) } }));
+    res.end(JSON.stringify({ ...world.status(), process: { node: process.version, upS: Math.round((Date.now() - started) / 1000), rssMB: Math.round(mem.rss / 1048576 * 10) / 10, heapMB: Math.round(mem.heapUsed / 1048576 * 10) / 10, heapTotalMB: Math.round(mem.heapTotal / 1048576 * 10) / 10, externalMB: Math.round(mem.external / 1048576 * 10) / 10, arrayBuffersMB: Math.round(mem.arrayBuffers / 1048576 * 10) / 10, cpuMs: Math.round((cpu.user + cpu.system) / 1000) } }));
     return;
   }
   if (path === '/reset-metrics' && process.env.ALLOW_RESET === '1') { world.resetMetrics(); res.writeHead(200, head); res.end('ok'); return; }
+  if (path === '/gc' && process.env.ALLOW_RESET === '1') { const had = typeof globalThis.gc === 'function'; if (had) globalThis.gc(); res.writeHead(200, head); res.end(had ? 'collected' : 'start node with --expose-gc'); return; }
   res.writeHead(200, { ...head, 'content-type': 'text/plain' });
   res.end('Calder Territory game server. Connect with the game client; see /status.\n');
 });

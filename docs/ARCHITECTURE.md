@@ -38,9 +38,11 @@ clock is moved instead, so a hiccup cannot snowball.
 `shared/sim/moveFoot.js` is one fixed step. The browser runs it the moment a key goes down; the server runs it
 when the input arrives. Two rules make both land on exactly the same numbers:
 
-- The step uses only `+ - * /` and `Math.sqrt`. Those are specified to the last bit; `Math.sin` and friends are
-  not, and differ between browsers. Directions come from a table built with plain arithmetic
-  (`shared/sim/trig.js`). The terrain height function follows the same rule.
+- The step uses only `+ - * /` and `Math.sqrt`. Every JavaScript engine hands those straight to the processor,
+  which rounds them one way only; `Math.sin` and friends are computed by each engine's own code and differ in the
+  last bit between browsers. Directions come from a table built with plain arithmetic (`shared/sim/trig.js`).
+  The terrain height function follows the same rule. This has been run in Node and Chromium (both V8); Firefox
+  and Safari are expected to agree and have not been run yet.
 - State is rounded to 32-bit floats at the end of every step, and a snapshot carries those same 32-bit values.
   So when the server corrects a client, the client then holds precisely what the server holds.
 
@@ -104,20 +106,33 @@ Reproduce with `npm run loadtest`.
 
 | | Everyone within 30 m | Busy town (200 m) | Scattered over the map |
 |---|---|---|---|
-| Server tick, median / 99th percentile | 1.4 / 2.7 ms | 1.3 / 2.6 ms | 0.9 / 2.0 ms |
-| Server CPU, share of one core | 7.5% | 7.1% | 6.6% |
-| Server memory | 81 MB | 81 MB | 81 MB |
+| Server tick, median / slowest 1% | 1.6 / 3.5 ms | 1.5 / 3.4 ms | 0.9 / 2.2 ms |
+| Server CPU, share of one core | 8.4% | 8.4% | 6.9% |
+| Server memory | 82 MB | 84 MB | 82 MB |
 | Down per player, average / worst second | 7.8 / 8.5 KB | 5.0 / 7.9 KB | 0.8 / 1.0 KB |
-| Up per player | 0.55 KB/s | 0.55 KB/s | 0.55 KB/s |
-| Largest snapshot | 428 bytes | 405 bytes | 70 bytes |
+| Up per player | 0.56 KB/s | 0.56 KB/s | 0.56 KB/s |
+| Largest snapshot | 429 bytes | 402 bytes | 70 bytes |
+| Others in view, average | 63 | 63 | 2 |
 | Own position, prediction against server | 0 mm, 0 corrections | 0 mm, 0 corrections | 0 mm, 0 corrections |
 | Others within 60 m, drawn against truth (99th percentile) | 1.7 cm | 1.8 cm | 1.6 cm |
-| Others at 60 to 150 m | | 2.0 cm | 1.9 cm |
-| Others beyond 150 m | | 6.8 cm | 7.9 cm |
+| Others at 60 to 150 m | | 1.9 cm | 1.9 cm |
+| Others beyond 150 m | | 5.7 cm | 8.5 cm |
 
-The budget is 50 ms a tick and 16 KB/s a player, so both have room: about 18 times on tick time and 2 times on
-bandwidth in the worst case. A CPU profile shows nearly all the server's time is the operating system sending
+The budget is 50 ms a tick and 16 KB/s a player, so both have room: about 14 times on tick time and 2 times on
+bandwidth in the worst case. The reports these numbers come from are in `docs/loadtest/`. A CPU profile shows nearly all the server's time is the operating system sending
 and receiving packets; stepping the world and building snapshots is under 1% of a core.
+
+**Thirty minutes.** The busy-town shape for 36,000 ticks (`--soak 1800`): the slowest 1% of ticks took 3.1 ms and
+one tick took 51 ms (other jobs were running on the machine at the time). No corrections in 2.3 million
+snapshots. Memory went from 82 MB to 95 MB over the first 13 minutes and then did not move for the last 17; the
+heap in use stayed between 10 and 16 MB throughout, so the rise is the runtime committing heap for itself.
+
+**600 extra bodies.** `--scenario town --bots 600 --max-players 664 --fps 20` adds 600 bots as stand-ins for NPCs
+and animals, all simulated in full: 664 bodies with about 565 in view of each player. Tick median 8.0 ms, slowest
+1% 14.3 ms, 20% of one core, 119 MB. Each player was sent 15.7 KB/s, the snapshot budget holding at its cap, and
+players within 60 m were still drawn to within 2 cm; the shortfall landed on distant bodies. At that load most of
+a tick is each player's snapshot walking and sorting its view records. If it ever matters, entities can be put in
+buckets by the tick they are next due instead of sorted every tick.
 
 Two things the numbers do not show:
 

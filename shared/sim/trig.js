@@ -1,7 +1,7 @@
 // Sine and cosine for the 65,536 directions a view can face, and for small turns, worked out with plain
-// arithmetic. Math.sin and Math.cos are allowed to differ in the last bit from one JavaScript engine to the next;
-// +, -, *, / and Math.sqrt are not. Movement uses only these, so Chrome, Firefox, Safari and the Node server all
-// step a body to exactly the same place.
+// arithmetic. Math.sin and Math.cos are computed by each JavaScript engine's own code and can differ in the last
+// bit from one engine to the next; +, -, *, / and Math.sqrt go straight to the processor and do not. Movement
+// uses only these, so every browser and the Node server step a body to exactly the same place.
 const STEP = Math.PI / 32768;
 const sinP = t => { const q = t * t; return t * (1 - q / 6 * (1 - q / 20 * (1 - q / 42 * (1 - q / 72 * (1 - q / 110 * (1 - q / 156)))))); };
 const cosP = t => { const q = t * t; return 1 - q / 2 * (1 - q / 12 * (1 - q / 30 * (1 - q / 56 * (1 - q / 90 * (1 - q / 132))))); };

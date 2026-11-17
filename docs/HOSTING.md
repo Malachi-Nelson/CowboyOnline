@@ -46,9 +46,9 @@ card needed. A free service is stopped after 15 minutes without an incoming requ
 takes about a minute to wake when someone next connects. Since February 2026 an open game connection counts as
 activity, so a world stays up while anyone is in it, and is empty when it sleeps.
 
-**How many players it can carry.** In the load test the server used 7.5% of one 2.1 GHz core for 64 players,
+**How many players it can carry.** In the load test the server used about 8% of one 2.1 GHz core for 64 players,
 almost all of it sending and receiving packets. A tenth of a CPU is about 10% of a core, so 64 players would sit
-at three quarters of the allowance with nothing left for a busy moment, and a service that hits its allowance is
+at four fifths of the allowance with nothing left for a busy moment, and a service that hits its allowance is
 paused until the next slice of time, which players feel as a freeze. Around 30 players leaves a comfortable
 margin today. That number will fall as later phases add things the server must simulate. Treat the free instance
 as a place for small test sessions, not as the home of a full world. It has not been deployed yet.
