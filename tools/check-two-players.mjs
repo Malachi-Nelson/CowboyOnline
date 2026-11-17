@@ -17,7 +17,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
 const errors = [];
 async function join(name) {
   const ctx = await browser.newContext({ viewport: { width: 960, height: 540 }, deviceScaleFactor: 1 }), page = await ctx.newPage();
-  await page.addInitScript(n => { HTMLCanvasElement.prototype.requestPointerLock = undefined; try { localStorage.setItem('calder.name', JSON.stringify(n)); } catch (e) { /* no storage */ } }, name);
+  await page.addInitScript(n => { HTMLCanvasElement.prototype.requestPointerLock = undefined; try { localStorage.setItem('cowboyonline.name', JSON.stringify(n)); } catch (e) { /* no storage */ } }, name);
   page.on('console', m => { if (m.type() === 'error') errors.push(`${name}: ${m.text()}`); });
   page.on('pageerror', e => errors.push(`${name}: ${e}`));
   await page.route('**/three.min.js', r => r.fulfill({ path: resolve(ROOT, 'node_modules/three/build/three.min.js'), contentType: 'application/javascript' }));

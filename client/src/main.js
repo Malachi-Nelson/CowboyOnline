@@ -67,9 +67,9 @@ addEventListener('resize', size);
 // ---- the title card
 const nameBox = $('name'), serverBox = $('server'), soundBox = $('sound');
 nameBox.value = saved.get('name', ''); soundBox.checked = saved.get('sound', true) !== false;
-$('join').hidden = hosted; $('joinNote').hidden = !hosted;
+$('joinBox').hidden = hosted; $('joinNote').hidden = !hosted;
 const params = new URLSearchParams(location.search), preset = params.get('server') || '';
-if (preset) serverBox.value = preset;
+if (preset) { serverBox.value = preset; $('joinBox').open = true; }
 function setName() { const n = nameBox.value.replace(/[^\w \-]/g, '').trim().slice(0, 14); if (n !== saved.get('name', '')) { saved.set('name', n); return true; } return false; }
 function play() {
   store.set({ mode: 'play' });

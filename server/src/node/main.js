@@ -31,7 +31,7 @@ const server = http.createServer((req, res) => {
   if (path === '/reset-metrics' && process.env.ALLOW_RESET === '1') { world.resetMetrics(); res.writeHead(200, head); res.end('ok'); return; }
   if (path === '/gc' && process.env.ALLOW_RESET === '1') { const had = typeof globalThis.gc === 'function'; if (had) globalThis.gc(); res.writeHead(200, head); res.end(had ? 'collected' : 'start node with --expose-gc'); return; }
   res.writeHead(200, { ...head, 'content-type': 'text/plain' });
-  res.end('Calder Territory game server. Connect with the game client; see /status.\n');
+  res.end('Cowboy Online game server. Connect with the game client; see /status.\n');
 });
 
 const wss = new WebSocketServer({
@@ -53,7 +53,7 @@ wss.on('connection', ws => {
 
 server.listen(PORT, () => {
   world.start();
-  console.log(`Calder Territory server on :${PORT}  bots=${world.bots.length}  spawn=${world.opts.spawn}  node=${process.version}`);
+  console.log(`Cowboy Online server on :${PORT}  bots=${world.bots.length}  spawn=${world.opts.spawn}  node=${process.version}`);
 });
 
 const stop = () => { world.stop(); for (const ws of wss.clients) ws.close(1001, 'server stopping'); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 1500).unref(); };

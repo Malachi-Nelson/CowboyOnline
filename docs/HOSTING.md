@@ -4,7 +4,8 @@ The server is one Node process per world. It needs a way for browsers to reach i
 the game page is served over HTTPS, browsers insist that the WebSocket is encrypted too (`wss://`). That last
 point decides most of what follows.
 
-The client is a single static file and can live on GitHub Pages at no cost.
+The client is a single static file and lives on GitHub Pages at no cost:
+<https://malachi-nelson.github.io/CowboyOnline/>. Every push to `main` rebuilds it.
 
 ## 1. In the browser tab
 
@@ -21,8 +22,9 @@ npm start                                         # the world, on port 8080
 cloudflared tunnel --url http://localhost:8080    # in a second terminal
 ```
 
-`cloudflared` prints an address like `https://random-words.trycloudflare.com`. Friends open the game page with
-`?server=wss://random-words.trycloudflare.com` on the end, or paste that address into the title card.
+`cloudflared` prints an address like `https://random-words.trycloudflare.com`. Friends open
+`https://malachi-nelson.github.io/CowboyOnline/?server=wss://random-words.trycloudflare.com`, or paste the
+`wss://` address into the title card.
 
 What Cloudflare's documentation says about quick tunnels: no account or domain needed, no uptime guarantee, at
 most 200 requests in flight at once, no Server-Sent Events, and the address changes every time you start one.
@@ -78,6 +80,6 @@ Caddy (which fetches certificates by itself) is the usual free pairing. This rou
 | `PORT` | 8080 | Port to listen on. Hosts such as Render set it for you. |
 | `BOTS` | 63 | Bots to keep in the world. They step aside as people join. |
 | `MAX_PLAYERS` | 64 | People and bots together. |
-| `ORIGINS` | any | Comma-separated list of page addresses allowed to connect, for example `https://you.github.io`. |
+| `ORIGINS` | any | Comma-separated list of page origins allowed to connect, for example `https://malachi-nelson.github.io`. |
 
 `/health` answers `ok`. `/status` returns the world's vital signs as JSON: players, tick timings, bytes a second.

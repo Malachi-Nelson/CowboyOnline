@@ -4,7 +4,7 @@
 # (see docs/HOSTING.md). Not yet deployed or tested.
 services:
   - type: web
-    name: calder-territory
+    name: cowboy-online
     runtime: node
     plan: free
     region: oregon                 # pick the region nearest your players; it cannot be changed later
@@ -17,5 +17,5 @@ services:
         value: "22"
       - key: BOTS
         value: "20"
-      # - key: ORIGINS             # once the client has an address, allow only that page to connect
-      #   value: https://<you>.github.io
+      - key: ORIGINS               # only the game page may connect
+        value: https://malachi-nelson.github.io

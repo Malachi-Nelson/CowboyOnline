@@ -1,9 +1,9 @@
 {
-  "name": "calder-territory",
+  "name": "cowboy-online",
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Calder Territory (working title): a frontier open world for the browser. Authoritative server, shared simulation, three.js client.",
+  "description": "Cowboy Online: a frontier open world for the browser, set in Calder Territory in 1899. Authoritative server, shared simulation, three.js client.",
   "scripts": {
     "start": "node server/src/node/main.js",
     "build": "node tools/build-client.mjs",
@@ -21,5 +21,10 @@
   "devDependencies": {
     "esbuild": "^0.28.2",
     "three": "0.128.0"
+  },
+  "homepage": "https://malachi-nelson.github.io/CowboyOnline/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Malachi-Nelson/CowboyOnline.git"
   }
 }

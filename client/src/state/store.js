@@ -13,6 +13,6 @@ export function createStore(initial) {
 
 // small values a player expects to find again next visit. Storage can be missing or refuse; the game runs without it.
 export const saved = {
-  get(k, d) { try { const v = localStorage.getItem('calder.' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
-  set(k, v) { try { localStorage.setItem('calder.' + k, JSON.stringify(v)); } catch (e) { /* not kept */ } },
+  get(k, d) { try { const v = localStorage.getItem('cowboyonline.' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('cowboyonline.' + k, JSON.stringify(v)); } catch (e) { /* not kept */ } },
 };

@@ -1,8 +1,11 @@
-# Calder Territory (working title)
+# CowboyOnline — Calder Territory
 
-A Wild West open world for the browser, built on the bones of [HoodWar](https://github.com/Malachi-Nelson/HoodWar):
-frontier, 1899, up to 64 players in one world on an authoritative server. This repository is at **Phase 2 of 11**:
-the networking foundation and a test range to try it on. There is no map, horse or gun yet.
+**Play it: <https://malachi-nelson.github.io/CowboyOnline/>**
+
+Cowboy Online is a Wild West open world for the browser, built on the bones of
+[HoodWar](https://github.com/Malachi-Nelson/HoodWar): the frontier in 1899, up to 64 players in one world on an
+authoritative server. Calder Territory is the world it is set in. This repository is at **Phase 2 of 11**: the
+networking foundation and a test range to try it on. There is no map, horse or gun yet.
 
 ![A figure in a hat and pale coat sprinting across open grassland, with a connection readout and a radar](docs/screenshots/sprinting-with-150ms-ping.jpg)
 
@@ -34,6 +37,11 @@ npm run loadtest         # 64 simulated players against a fresh server; add -- -
 
 Open `client/dist/index.html` in a browser to play in the tab's own world. To join a server instead, add
 `?server=ws://localhost:8080` to the address, or type the address into the title card.
+
+## How the page gets published
+
+Every push to `main` runs the tests, builds the page and puts `client/dist/index.html` on the `gh-pages` branch
+(`.github/workflows/ci.yml`). GitHub Pages serves that branch at the address above. Nothing built is kept on `main`.
 
 `node tools/check-client.mjs` drives the built page in a headless browser and saves screenshots to `tools/out/`.
 It needs Playwright, which is not in `package.json` (`npm i -D playwright && npx playwright install chromium`).
@@ -68,7 +76,7 @@ Four ways to run a world without paying, from least to most effort. Details and 
 ## Phases
 
 1. Audit of HoodWar and the architecture plan. Done.
-2. Server and networking foundation, load-tested with 64 clients. **This commit.**
+2. Server and networking foundation, load-tested with 64 clients. Done.
 3. World foundation: the map, streamed terrain, towns, day and night, weather.
 4. Combat, the focus meter, law and wanted levels.
 5. Accounts, saving, economy.
