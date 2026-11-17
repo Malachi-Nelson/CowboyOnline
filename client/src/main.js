@@ -61,7 +61,7 @@ function connect(url) {
   s.open();
 }
 
-function size() { const [w, h] = view.resize(); if (camera) camera.resize(w, h); }
+function size() { const [w, h] = view.resize(); if (camera && w > 0 && h > 0) camera.resize(w, h); }   // a page opened out of sight has no size yet
 addEventListener('resize', size);
 
 // ---- the title card
@@ -114,7 +114,7 @@ addEventListener('keydown', e => {
   else if (e.code === 'KeyG') tGrid();
   else if (e.code === 'Escape' || e.code === 'KeyM') store.set({ mode: 'menu' });
 });
-if (innerWidth < 760) store.set({ showStats: false });
+if (innerWidth > 0 && innerWidth < 760) store.set({ showStats: false });
 
 // ---- names over other people (not bots), near enough to matter
 const tags = $('tags'), tagOf = new Map(), V = new globalThis.THREE.Vector3();

@@ -38,7 +38,7 @@ export function createScene(canvas) {
 
   function resize() {
     const w = canvas.clientWidth || innerWidth, h = canvas.clientHeight || innerHeight;
-    renderer.setSize(w, h, false);
+    if (w > 0 && h > 0) renderer.setSize(w, h, false);
     return [w, h];
   }
   function render(cam) {
