@@ -1,0 +1,24 @@
+{
+  "name": "calder-territory",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Calder Territory (working title): a frontier open world for the browser. Authoritative server, shared simulation, three.js client.",
+  "scripts": {
+    "start": "node server/src/node/main.js",
+    "build": "node tools/build-client.mjs",
+    "dev": "node tools/build-client.mjs --serve",
+    "test": "node --test \"test/*.test.js\"",
+    "loadtest": "node tools/loadtest/run.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "three": "0.187.0"
+  }
+}

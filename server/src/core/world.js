@@ -1,0 +1,359 @@
+// The authoritative world. One of these is one game world of up to 64 players: it steps every body, decides what
+// each player may see, and writes each player a snapshot 20 times a second.
+//
+// Nothing in server/src/core uses Node: the same code runs under Node behind a WebSocket (server/src/node) and
+// inside a browser tab for free solo play (client/src/net/local.js). Connections are anything with send(bytes)
+// and close().
+import {
+  PROTOCOL_VERSION, TICK_RATE, TICK_MS, CMDS_PER_TICK, WORLD_SIZE, HUB_X, HUB_Z, MAX_PLAYERS,
+  VIEW_ENTER, VIEW_LEAVE, BAND_NEAR, BAND_MID, BAND_FAR, SNAPSHOT_BUDGET, KIND_PLAYER, EF_BOT, ST_GROUND, ST_SPRINT, ST_MOVE,
+} from '../../../shared/constants.js';
+import { Writer, Reader } from '../../../shared/net/codec.js';
+import { MSG, REJECT, UM, encWelcome, encReject, encPong, decHello, writeSnapshotHead, writeSpawn, spawnSize, qPos, qY, qYaw } from '../../../shared/net/messages.js';
+import { makeField } from '../../../shared/world/field.js';
+import { makeFoot, stepFoot, footFlags, FOOT } from '../../../shared/sim/moveFoot.js';
+import { rng32, seqDiff, yawOf, TAU } from '../../../shared/math.js';
+import { InterestGrid } from './interest.js';
+import { Metrics } from './metrics.js';
+import { Bot } from './bots.js';
+
+export const HIST = 32;                       // ticks of position history per entity (1.6 s), for lag compensation
+const QUEUE = 64;                             // inputs a player may have waiting (about a second)
+const CREDIT_MAX = 30;                        // inputs a player may spend in one tick after a stall (half a second)
+const CREDIT_RATE = CMDS_PER_TICK * 1.02;     // inputs earned a tick: real time, plus 2% so a fast clock is not punished
+const BUFFER_MAX = 2 * CMDS_PER_TICK;         // inputs left waiting, at most, to ride out uneven arrival
+const DRAIN_TICKS = 5 * TICK_RATE;            // how often a buffer that was never needed gives one input back
+const GRACE_TICKS = 30 * TICK_RATE;           // a dropped player's body stays this long
+const ID_REST_TICKS = 5 * TICK_RATE;          // an id is not handed out again for this long
+const FLOOD = 240;                            // messages a second before a connection is closed
+const ENTER2 = VIEW_ENTER * VIEW_ENTER, LEAVE2 = VIEW_LEAVE * VIEW_LEAVE;
+const NEAR2 = BAND_NEAR * BAND_NEAR, MID2 = BAND_MID * BAND_MID, FAR2 = BAND_FAR * BAND_FAR;
+const UPDATE_MAX = 21;                        // most bytes one entity update can take
+const NEUTRAL = { mx: 0, mz: 0, yaw: 0, buttons: 0 };
+const NAMES = ['Abel', 'Ada', 'Amos', 'Boone', 'Clem', 'Cora', 'Eli', 'Ezra', 'Flora', 'Gus', 'Hank', 'Hattie', 'Ike', 'Jeb', 'Josiah', 'Levi', 'Lottie', 'Mabel', 'Minnie', 'Ned', 'Nell', 'Opal', 'Otis', 'Pearl', 'Rufus', 'Ruth', 'Seth', 'Silas', 'Tess', 'Tobias', 'Vera', 'Virgil', 'Walt', 'Zeke'];
+const utf8 = new TextEncoder();
+const byPrio = (a, b) => b.sort - a.sort;
+const cleanName = n => String(n || '').replace(/[^\w \-]/g, '').trim().slice(0, 14) || 'Rider';
+const frameOut = n => n + (n < 126 ? 2 : 4);  // bytes on the wire for a server-to-client WebSocket frame
+const frameIn = n => n + (n < 126 ? 6 : 8);   // client frames are masked: four bytes more
+
+export class World {
+  constructor(opts = {}) {
+    this.opts = Object.assign({ bots: 63, maxPlayers: MAX_PLAYERS, spawn: 'hub', roam: 500, seed: 1899 }, opts);
+    this.now = this.opts.now || (() => performance.now());
+    this.field = makeField(this.opts.seed);
+    this.grid = new InterestGrid();
+    this.ents = new Map(); this.list = []; this.people = []; this.bots = [];
+    this.clients = new Set(); this.tokens = new Map();
+    this.tick = 0; this.t0 = this.now(); this.nextT = 0; this.timer = null;
+    this.nextId = 1; this.freeIds = [];
+    this.rand = rng32((this.opts.seed ^ 0x51ed270b) >>> 0);
+    this.metrics = new Metrics();
+    this.w = new Writer(4096); this.w2 = new Writer(512); this.r = new Reader(new Uint8Array(0));
+    this.mark = 0; this.tmp = []; this.cand = [];
+    this.totals = { bytesOut: 0, bytesIn: 0, snapshots: 0, inputsDropped: 0, snapshotsSkipped: 0, kicked: 0, biggestSnapshot: 0 };
+    this.syncBots();
+  }
+
+  serverNow() { return this.now() - this.t0; }
+  get humans() { return this.people.length; }
+
+  // ---- the clock: ticks happen at t0 + n * 50 ms; a stall is not replayed, the clock is moved instead
+  start() {
+    if (this.timer) return;
+    this.t0 = this.now() - this.tick * TICK_MS; this.nextT = this.t0 + (this.tick + 1) * TICK_MS;
+    const loop = () => {
+      let now = this.now(), n = 0;
+      while (now >= this.nextT && n < 4) { this.step(); this.nextT += TICK_MS; n++; }
+      now = this.now();
+      if (now - this.nextT > 200) { this.nextT = now + TICK_MS; this.t0 = this.nextT - (this.tick + 1) * TICK_MS; }
+      this.timer = setTimeout(loop, Math.max(1, this.nextT - now));
+    };
+    this.timer = setTimeout(loop, TICK_MS);
+  }
+  stop() { clearTimeout(this.timer); this.timer = null; }
+
+  // ---- entities
+  allocId() {
+    if (this.freeIds.length && this.tick - this.freeIds[0].at > ID_REST_TICKS) return this.freeIds.shift().id;
+    if (this.nextId > 65535) throw new Error('out of entity ids');
+    return this.nextId++;
+  }
+  spawnEntity(name, bot, x, z) {
+    const f = this.field; let y = f.terrain.heightAt(x, z);
+    if (f.boxes.pushOut(x, z, FOOT.r, y + FOOT.step, y + FOOT.h)) { x = f.boxes.x; z = f.boxes.z; y = f.terrain.heightAt(x, z); }
+    const e = {
+      id: this.allocId(), kind: KIND_PLAYER, ef: bot ? EF_BOT : 0, name, nameBytes: utf8.encode(name).length,
+      s: makeFoot(x, y, z), yaw: this.rand() * TAU, st: ST_GROUND, qx: 0, qy: 0, qz: 0, qyaw: 0,
+      cell: -1, gone: false, still: 2, lastChange: this.tick, restAt: this.tick, moveStart: this.tick,
+      hist: new Float32Array(HIST * 3),
+      // people only
+      client: null, token: '', q: null, qHead: 0, qCount: 0, lastQueued: -1, credit: 0, ackSeq: 0, idle: 0, graceUntil: 0,
+      depthMin: 99, depthAt: 0, extra: 0,
+    };
+    e.qx = qPos(x); e.qy = qY(y); e.qz = qPos(z); e.qyaw = qYaw(e.yaw);
+    for (let i = 0; i < HIST; i++) { e.hist[i * 3] = x; e.hist[i * 3 + 1] = y; e.hist[i * 3 + 2] = z; }
+    this.ents.set(e.id, e); this.list.push(e); this.grid.add(e);
+    return e;
+  }
+  removeEntity(e) {
+    if (e.gone) return;
+    e.gone = true; this.grid.remove(e); this.ents.delete(e.id);
+    let i = this.list.indexOf(e); if (i >= 0) this.list.splice(i, 1);
+    i = this.people.indexOf(e); if (i >= 0) this.people.splice(i, 1);
+    for (const c of this.clients) { const rec = c.view.get(e.id); if (rec) { c.view.delete(e.id); if (rec.known) c.gone.push(e.id); } }
+    if (e.token) this.tokens.delete(e.token);
+    this.freeIds.push({ id: e.id, at: this.tick });
+  }
+  spawnPoint() {
+    const r = this.rand;
+    if (this.opts.spawn === 'spread') return [200 + r() * (WORLD_SIZE - 400), 200 + r() * (WORLD_SIZE - 400)];
+    const a = r() * TAU, d = 4 + r() * 8;
+    return [HUB_X + Math.cos(a) * d, HUB_Z + Math.sin(a) * d];
+  }
+  // keep the world at its bot count, making room as people arrive
+  syncBots() {
+    const want = Math.max(0, Math.min(this.opts.bots, this.opts.maxPlayers - this.people.length)), r = this.rand;
+    while (this.bots.length > want) this.removeEntity(this.bots.pop().e);
+    while (this.bots.length < want) {
+      const spread = this.opts.spawn === 'spread';
+      const home = spread ? { x: 300 + r() * (WORLD_SIZE - 600), z: 300 + r() * (WORLD_SIZE - 600), r: 150 } : { x: HUB_X, z: HUB_Z, r: this.opts.roam };
+      const a = r() * TAU, d = Math.sqrt(r()) * home.r, n = this.bots.length;
+      const e = this.spawnEntity(NAMES[n % NAMES.length] + (n >= NAMES.length ? ' ' + (1 + ((n / NAMES.length) | 0)) : ''), true, home.x + Math.cos(a) * d, home.z + Math.sin(a) * d);
+      this.bots.push(new Bot(e, rng32((this.opts.seed + e.id * 7919) >>> 0), home));
+    }
+  }
+
+  // ---- connections
+  connect(conn) {
+    const c = { conn, player: null, view: new Map(), gone: [], fresh: true, viewDelay: 100, msgs: 0, bytesOut: 0, bytesIn: 0, outAcc: 0, outRate: 0, outPeak: 0, inAcc: 0, inRate: 0, inPeak: 0 };
+    this.clients.add(c);
+    return c;
+  }
+  disconnect(c) {
+    if (!this.clients.delete(c)) return;
+    const p = c.player;
+    if (p) { p.client = null; c.player = null; p.graceUntil = this.tick + GRACE_TICKS; }
+  }
+  kick(c) { this.totals.kicked++; try { c.conn.close(); } catch (e) { /* already gone */ } this.disconnect(c); }
+  send(c, bytes) {
+    const n = frameOut(bytes.length);
+    c.bytesOut += n; c.outAcc += n; this.totals.bytesOut += n;
+    c.conn.send(bytes);
+  }
+  receive(c, u8) {
+    const n = frameIn(u8.length);
+    c.bytesIn += n; c.inAcc += n; this.totals.bytesIn += n;
+    if (++c.msgs > FLOOD) { this.kick(c); return; }
+    try {
+      const r = this.r.set(u8), type = r.u8();
+      if (type === MSG.INPUT) this.onInput(c, r);
+      else if (type === MSG.PING) this.send(c, encPong(this.w2, r.f64(), this.serverNow()));
+      else if (type === MSG.HELLO) this.onHello(c, r);
+      else this.kick(c);
+    } catch (err) {
+      if (!(err instanceof RangeError)) throw err;
+      this.kick(c);                                              // a message that does not parse ends the connection
+    }
+  }
+  onHello(c, r) {
+    if (c.player) return;
+    const h = decHello(r);
+    if (h.proto !== PROTOCOL_VERSION) { this.send(c, encReject(this.w2, REJECT.VERSION, 'This page is out of date. Reload it to play.')); this.kick(c); return; }
+    let p = h.token ? this.tokens.get(h.token) : null;
+    if (p && p.gone) p = null;
+    if (p && p.client) {                                         // the same player on a new connection: the old one is closed
+      const old = p.client; old.player = null; p.client = null;
+      this.clients.delete(old); try { old.conn.close(); } catch (e) { /* already gone */ }
+    }
+    if (!p) {
+      if (this.people.length >= this.opts.maxPlayers) { this.send(c, encReject(this.w2, REJECT.FULL, 'This world is full.')); this.kick(c); return; }
+      // a bot steps aside first, so the newcomer's id is not one a client still shows
+      if (this.bots.length && this.people.length + this.bots.length >= this.opts.maxPlayers) this.removeEntity(this.bots.pop().e);
+      const at = this.spawnPoint();
+      p = this.spawnEntity(cleanName(h.name), false, at[0], at[1]);
+      p.q = Array.from({ length: QUEUE }, () => ({ seq: 0, mx: 0, mz: 0, yaw: 0, buttons: 0 }));
+      const b = new Uint8Array(12); globalThis.crypto.getRandomValues(b);
+      p.token = Array.from(b, v => v.toString(16).padStart(2, '0')).join('');
+      this.tokens.set(p.token, p); this.people.push(p);
+    }
+    p.client = c; c.player = p; c.fresh = true;
+    p.graceUntil = 0; p.qHead = 0; p.qCount = 0; p.lastQueued = -1; p.credit = CMDS_PER_TICK; p.ackSeq = 0; p.idle = 0;
+    p.depthMin = 99; p.depthAt = this.tick; p.extra = 0;
+    this.syncBots();
+    this.send(c, encWelcome(this.w2, { id: p.id, tickRate: TICK_RATE, tick: this.tick, serverNow: this.serverNow(), seed: this.opts.seed, token: p.token, x: p.s.x, y: p.s.y, z: p.s.z }));
+  }
+  onInput(c, r) {
+    const p = c.player; if (!p) return;
+    let seq = r.u16();
+    c.viewDelay = (Math.floor(this.serverNow()) - r.u16()) & 65535;     // how far in the past this player sees the world, ms
+    const n = r.u8(); if (n > 12) throw new RangeError('too many inputs in one packet');
+    for (let i = 0; i < n; i++, seq = (seq + 1) & 65535) {
+      const mx = r.i8(), mz = r.i8(), yaw = r.u16(), buttons = r.u8();
+      if (p.lastQueued >= 0 && seqDiff(seq, p.lastQueued) <= 0) continue;        // already have it
+      if (p.qCount === QUEUE) { p.qHead = (p.qHead + 1) % QUEUE; p.qCount--; this.totals.inputsDropped++; }
+      const q = p.q[(p.qHead + p.qCount) % QUEUE]; p.qCount++;
+      q.seq = seq; q.mx = mx < -127 ? -127 : mx; q.mz = mz < -127 ? -127 : mz; q.yaw = yaw; q.buttons = buttons & 7;
+      p.lastQueued = seq;
+    }
+  }
+
+  // ---- one tick
+  step() {
+    const t0 = this.now(), tick = ++this.tick, field = this.field, t = tick / TICK_RATE;
+
+    for (let i = 0; i < this.bots.length; i++) {
+      const b = this.bots[i]; b.think(t);
+      for (let k = 0; k < CMDS_PER_TICK; k++) stepFoot(b.e.s, b.cmd, field);
+    }
+    let expired = null;
+    for (let i = 0; i < this.people.length; i++) {
+      const p = this.people[i];
+      if (!p.client) {                                           // dropped: the body comes to rest and waits out its grace
+        if (tick >= p.graceUntil) (expired || (expired = [])).push(p);
+        else for (let k = 0; k < CMDS_PER_TICK; k++) stepFoot(p.s, NEUTRAL, field);
+        continue;
+      }
+      // Each input is worth 1/60 s. A player earns three a tick, so nobody moves faster than time for long.
+      p.credit = Math.min(p.credit + CREDIT_RATE, CREDIT_MAX);
+      // Inputs arrive in bursts on a real connection: none this tick, two packets the next. Taking three a tick and
+      // leaving up to two packets waiting keeps the body moving evenly for everyone watching it. A deeper queue
+      // than that is caught up at once, and a buffer that went unused for five seconds is handed back one input
+      // at a time, so the delay it adds does not stay for good.
+      let n = p.qCount; const spare = n - CMDS_PER_TICK;
+      if (spare > BUFFER_MAX) n = spare;
+      else if (spare > 0) n = CMDS_PER_TICK + p.extra;
+      p.extra = 0;
+      if (n > p.credit) n = Math.floor(p.credit);
+      p.credit -= n;
+      if (p.qCount - n < p.depthMin) p.depthMin = p.qCount - n;
+      if (tick - p.depthAt >= DRAIN_TICKS) { if (p.depthMin >= CMDS_PER_TICK) p.extra = 1; p.depthMin = 99; p.depthAt = tick; }
+      if (n === 0) { if (++p.idle > 10) for (let k = 0; k < CMDS_PER_TICK; k++) stepFoot(p.s, NEUTRAL, field); continue; }
+      p.idle = 0;
+      while (n--) { const q = p.q[p.qHead]; p.qHead = (p.qHead + 1) % QUEUE; p.qCount--; stepFoot(p.s, q, field); p.ackSeq = q.seq; }
+    }
+    if (expired) { for (const p of expired) this.removeEntity(p); this.syncBots(); }
+
+    // what everyone else will be told about each body, and where it was (for rewinding later)
+    const hi = (tick % HIST) * 3;
+    for (let i = 0; i < this.list.length; i++) {
+      const e = this.list[i], s = e.s, sp2 = s.vx * s.vx + s.vz * s.vz;
+      this.grid.move(e);
+      if (sp2 > 0.16) e.yaw = yawOf(s.vx, s.vz);
+      const qx = qPos(s.x), qy = qY(s.y), qz = qPos(s.z), qyaw = qYaw(e.yaw), st = (s.ground ? ST_GROUND : 0) | (sp2 > 30 ? ST_SPRINT : 0) | (sp2 > 0.09 ? ST_MOVE : 0);
+      if (qx !== e.qx || qy !== e.qy || qz !== e.qz || qyaw !== e.qyaw || st !== e.st) {
+        if (e.still >= 2) { e.restAt = e.lastChange; e.moveStart = tick; }
+        e.still = 0; e.lastChange = tick;
+        e.qx = qx; e.qy = qy; e.qz = qz; e.qyaw = qyaw; e.st = st;
+      } else e.still++;
+      const h = e.hist; h[hi] = s.x; h[hi + 1] = s.y; h[hi + 2] = s.z;
+    }
+
+    for (const c of this.clients) if (c.player) this.sendSnapshot(c, tick);
+
+    if (tick % TICK_RATE === 0) {
+      for (const c of this.clients) {
+        c.outRate = c.outAcc; if (c.outAcc > c.outPeak) c.outPeak = c.outAcc; c.outAcc = 0;
+        c.inRate = c.inAcc; if (c.inAcc > c.inPeak) c.inPeak = c.inAcc; c.inAcc = 0;
+        c.msgs = 0;
+      }
+    }
+    this.metrics.tick(this.now() - t0);
+  }
+
+  // ---- who a player can see: in at 384 m, out at 448 m, rebuilt four times a second
+  refreshView(c) {
+    const s = c.player.s, tmp = this.tmp, mark = ++this.mark;
+    tmp.length = 0; this.grid.query(s.x, s.z, VIEW_LEAVE, tmp);
+    for (let i = 0; i < tmp.length; i++) {
+      const e = tmp[i]; if (e === c.player) continue;
+      const dx = e.s.x - s.x, dz = e.s.z - s.z, d2 = dx * dx + dz * dz, rec = c.view.get(e.id);
+      if (rec) { if (d2 <= LEAVE2) rec.mark = mark; }
+      else if (d2 <= ENTER2) c.view.set(e.id, { e, known: false, qx: 0, qy: 0, qz: 0, yaw: 0, st: 0, prio: 1, sent: 0, sort: 0, mark });
+    }
+    for (const [id, rec] of c.view) if (rec.mark !== mark) { c.view.delete(id); if (rec.known) c.gone.push(id); }
+  }
+
+  // ---- one snapshot: own state, who left, who arrived, then the most overdue updates until the budget is spent
+  sendSnapshot(c, tick) {
+    if (c.conn.buffered > 65536) { this.totals.snapshotsSkipped++; return; }   // the socket is backed up: do not pile on
+    const p = c.player, s = p.s, w = this.w, B = SNAPSHOT_BUDGET;
+    writeSnapshotHead(w, tick, p.ackSeq, s, footFlags(s));
+    if (c.fresh || (tick + p.id) % 5 === 0) { this.refreshView(c); c.fresh = false; }
+
+    let at = w.o, n = 0; w.u8(0);
+    const gone = c.gone;
+    while (n < gone.length && n < 255 && w.o + 2 <= B - 2) { w.u16(gone[n]); n++; }
+    if (n) { gone.splice(0, n); w.setU8(at, n); }
+
+    // Everything in view earns priority each tick, faster the nearer it is. Whatever has earned a full point and
+    // has something new to say is a candidate; a body standing still says nothing and costs nothing.
+    const cand = this.cand; cand.length = 0; let fresh = 0;
+    for (const rec of c.view.values()) {
+      const e = rec.e, dx = e.s.x - s.x, dz = e.s.z - s.z, d2 = dx * dx + dz * dz;
+      rec.prio += d2 < NEAR2 ? 1 : d2 < MID2 ? 0.5 : d2 < FAR2 ? 0.25 : 0.1;
+      if (rec.prio > 4) rec.prio = 4;
+      if (rec.prio < 1) continue;
+      if (!rec.known) { rec.sort = 100 - d2 * 1e-4; cand.push(rec); fresh++; }
+      else if (e.qx !== rec.qx || e.qz !== rec.qz || e.qy !== rec.qy || e.qyaw !== rec.yaw || e.st !== rec.st) { rec.sort = rec.prio; cand.push(rec); }
+    }
+    if (cand.length > 1) cand.sort(byPrio);
+
+    // arrivals, nearest first, using at most 60% of what is left so that those already in view still move
+    at = w.o; n = 0; w.u8(0);
+    if (fresh) {
+      const limit = w.o + Math.floor((B - w.o) * 0.6);
+      for (let i = 0; i < cand.length; i++) {
+        const rec = cand[i]; if (rec.known) break;
+        const e = rec.e; if (n === 255 || w.o + spawnSize(e) > limit) break;
+        writeSpawn(w, e);
+        rec.known = true; rec.qx = e.qx; rec.qy = e.qy; rec.qz = e.qz; rec.yaw = e.qyaw; rec.st = e.st; rec.prio = 0; rec.sent = tick; rec.sort = -1; n++;
+      }
+      w.setU8(at, n);
+    }
+
+    at = w.o; n = 0; w.u8(0);
+    for (let i = 0; i < cand.length; i++) {
+      const rec = cand[i]; if (!rec.known || rec.sort < 0) continue;
+      if (n === 255 || w.o + UPDATE_MAX > B) break;
+      const e = rec.e, dx = e.qx - rec.qx, dy = e.qy - rec.qy, dz = e.qz - rec.qz;
+      let mask = (dx || dy || dz ? UM.POS : 0) | (e.qyaw !== rec.yaw ? UM.YAW : 0) | (e.st !== rec.st ? UM.STATE : 0), hold = 0;
+      // If this body stood still since before the last thing this player heard about it, say how long ago it set
+      // off, so their copy does not start drifting before the real one moved.
+      if (rec.sent >= e.restAt && rec.sent < e.moveStart - 1) { hold = Math.min(255, tick - (e.moveStart - 1)); if (hold > 0) mask |= UM.HOLD; }
+      w.u16(e.id); w.u8(mask);
+      if (mask & UM.HOLD) w.u8(hold);
+      if (mask & UM.POS) { w.vari(dx); w.vari(dz); w.vari(dy); }
+      if (mask & UM.YAW) w.u8(e.qyaw);
+      if (mask & UM.STATE) w.u8(e.st);
+      rec.qx = e.qx; rec.qy = e.qy; rec.qz = e.qz; rec.yaw = e.qyaw; rec.st = e.st; rec.prio = 0; rec.sent = tick; n++;
+    }
+    if (n) w.setU8(at, n);
+
+    if (w.o > this.totals.biggestSnapshot) this.totals.biggestSnapshot = w.o;
+    this.totals.snapshots++;
+    this.send(c, w.bytes());
+  }
+
+  // ---- where a body was at an earlier tick (fractions allowed). Used for lag compensation from Phase 4.
+  positionAt(e, tick, out) {
+    const newest = this.tick, oldest = newest - (HIST - 1);
+    const t = tick > newest ? newest : tick < oldest ? oldest : tick, a = Math.floor(t), f = t - a;
+    const h = e.hist, i = (((a % HIST) + HIST) % HIST) * 3, j = ((((a + 1) % HIST) + HIST) % HIST) * 3;
+    if (f <= 0 || a + 1 > newest) { out.x = h[i]; out.y = h[i + 1]; out.z = h[i + 2]; }
+    else { out.x = h[i] + (h[j] - h[i]) * f; out.y = h[i + 1] + (h[j + 1] - h[i + 1]) * f; out.z = h[i + 2] + (h[j + 2] - h[i + 2]) * f; }
+    return out;
+  }
+
+  status() {
+    let n = 0, out = 0, peak = 0, inn = 0, inPeak = 0, view = 0;
+    for (const c of this.clients) if (c.player) { n++; out += c.outRate; inn += c.inRate; if (c.outPeak > peak) peak = c.outPeak; if (c.inPeak > inPeak) inPeak = c.inPeak; if (c.view.size > view) view = c.view.size; }
+    return {
+      protocol: PROTOCOL_VERSION, tick: this.tick, tickRate: TICK_RATE, uptimeS: Math.round(this.serverNow() / 1000),
+      people: this.people.length, connected: n, bots: this.bots.length, entities: this.list.length, maxPlayers: this.opts.maxPlayers,
+      tickMs: this.metrics.summary(),
+      bytesPerSecond: { outAvg: n ? Math.round(out / n) : 0, outPeak: peak, inAvg: n ? Math.round(inn / n) : 0, inPeak },
+      biggestView: view, totals: this.totals,
+    };
+  }
+}
