@@ -42,11 +42,16 @@ test('an old client, a full world and a nonsense message are all turned away', (
   assert.equal(world.clients.size, 2);
 });
 
-test('a connection that floods is closed', () => {
+test('a connection that floods is closed, and cannot talk its way back in', () => {
   const world = new World({ bots: 0, now: () => 0 });
   const a = rawClient(world); a.send(hello());
   for (let i = 0; i < 300 && !a.closed; i++) a.send(inputs(1 + i * 3, 3, 0, 0, 0, 0));
   assert.ok(a.closed);
+  // whatever was still in the pipe when it was closed is ignored: no second body, nothing left attached
+  const before = world.list.length; a.got.length = 0;
+  a.send(hello('Ghost')); a.send(inputs(1, 3, 0, 127, 0, 0));
+  assert.equal(world.list.length, before); assert.equal(a.got.length, 0); assert.equal(world.clients.size, 0);
+  assert.ok(world.people.every(p => p.client === null));
 });
 
 test('every snapshot fits the budget and the client ends up with exactly what the server thinks it has', () => {

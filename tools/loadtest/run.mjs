@@ -4,6 +4,8 @@
 //   node tools/loadtest/run.mjs --quick            20 s each (what CI runs)
 //   node tools/loadtest/run.mjs --soak 1800        one 30-minute run, watching memory
 //   node tools/loadtest/run.mjs --url wss://host   test a server that is already running somewhere
+//   --bots 600 --max-players 664                   add bots to the world as stand-ins for NPCs and animals
+//   --fps 20                                       how often each simulated player draws (60 by default)
 //
 // The players are real clients: the same Session class the game page uses, doing prediction, reconciliation and
 // interpolation, over real WebSockets. Only the screen is missing. Each one wanders like a restless person.
@@ -28,6 +30,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const args = process.argv.slice(2), flag = n => args.includes('--' + n), opt = (n, d) => { const i = args.indexOf('--' + n); return i >= 0 ? args[i + 1] : d; };
 const N = +opt('clients', 64), PING = +opt('ping', 150), JITTER = +opt('jitter', 20), QUICK = flag('quick');
 const SECONDS = +opt('seconds', QUICK ? 20 : 60), SOAK = +opt('soak', 0), URL_ = opt('url', ''), PORT = +opt('port', 18200);
+const BOTS = +opt('bots', 0), MAXP = +opt('max-players', Math.max(64, N + BOTS)), FPS = +opt('fps', 60), NAME = opt('name', '');
 const OUT = resolve(ROOT, opt('out', 'tools/loadtest/out'));
 const SCENARIOS = {
   street: { spawn: 'hub', r: 30, text: 'everyone within 30 m of one spot: the worst case for bandwidth' },
@@ -62,7 +65,7 @@ function brain(rand, radius) {
 
 async function startServer(spawnMode) {
   if (URL_) return { url: URL_, http: URL_.replace(/^ws/, 'http'), stop() {} };
-  const child = spawn(process.execPath, [resolve(ROOT, 'server/src/node/main.js')], { env: { ...process.env, PORT: String(PORT), BOTS: '0', SPAWN: spawnMode, ALLOW_RESET: '1' }, stdio: ['ignore', 'ignore', 'inherit'] });
+  const child = spawn(process.execPath, [resolve(ROOT, 'server/src/node/main.js')], { env: { ...process.env, PORT: String(PORT), BOTS: String(BOTS), MAX_PLAYERS: String(MAXP), SPAWN: spawnMode, ALLOW_RESET: '1' }, stdio: ['ignore', 'ignore', 'inherit'] });
   const http = `http://127.0.0.1:${PORT}`;
   for (let i = 0; i < 100; i++) { try { if ((await fetch(http + '/health')).ok) break; } catch (e) { /* not up yet */ } await sleep(50); }
   return { url: `ws://127.0.0.1:${PORT}`, http, stop: () => new Promise(r => { child.once('exit', r); child.kill('SIGTERM'); }) };
@@ -71,7 +74,7 @@ async function startServer(spawnMode) {
 async function scenario(name, seconds, soak) {
   const sc = SCENARIOS[name], server = await startServer(sc.spawn), rand = rng32(1899 + name.length);
   const status = async () => (await fetch(server.http + '/status')).json();
-  console.log(`\n== ${name}: ${sc.text}\n   ${N} players, ${PING} ms ping (${PING / 2} ms each way, plus up to ${JITTER} ms of jitter), ${seconds} s`);
+  console.log(`\n== ${name}: ${sc.text}\n   ${N} players${BOTS ? ' and ' + BOTS + ' bots' : ''}, ${PING} ms ping (${PING / 2} ms each way, plus up to ${JITTER} ms of jitter), ${seconds} s`);
 
   // ---- connect everyone over two seconds
   const sessions = [], byId = new Map(), TRUTH = 4096;
@@ -84,7 +87,7 @@ async function scenario(name, seconds, soak) {
     sessions.push(s);
     setTimeout(() => s.open(), i * (2000 / N));
   }
-  const loop = setInterval(() => { const now = performance.now(); for (const s of sessions) s.frame(now); }, 16);
+  const loop = setInterval(() => { const now = performance.now(); for (const s of sessions) s.frame(now); }, Math.round(1000 / FPS));
   await sleep(2000 + (QUICK ? 5000 : 8000));                     // let them join and scatter
   const playing = sessions.filter(s => s.state === 'playing').length;
   if (playing < N) console.log(`   only ${playing} of ${N} joined:`, [...new Set(sessions.filter(s => s.state !== 'playing').map(s => s.state + ' ' + s.reason))].join('; '));
@@ -131,7 +134,7 @@ async function scenario(name, seconds, soak) {
   const cpu = URL_ ? null : (last.process.cpuMs - first.process.cpuMs) / (wall * 10), stillPlaying = sessions.filter(s => s.state === 'playing').length;
   const afterWarm = series.filter(p => p.t >= Math.min(300, seconds / 3)), rssGrow = afterWarm.length > 1 ? afterWarm.at(-1).rssMB - afterWarm[0].rssMB : 0, heapGrow = afterWarm.length > 1 ? afterWarm.at(-1).heapMB - afterWarm[0].heapMB : 0;
   const res = {
-    scenario: name, about: sc.text, players: N, playing: stillPlaying, seconds: Math.round(wall), pingMs: PING, jitterMs: JITTER, measuredPingMs: Math.round(rtt / sessions.length),
+    scenario: name, about: sc.text, players: N, bots: BOTS, playing: stillPlaying, seconds: Math.round(wall), pingMs: PING, jitterMs: JITTER, measuredPingMs: Math.round(rtt / sessions.length),
     server: { tickMs: last.tickMs, cpuPercentOfOneCore: cpu === null ? null : r1(cpu), cpuPercentPerPlayer: cpu === null ? null : r3(cpu / N), rssMB: last.process.rssMB, heapMB: last.process.heapMB, rssGrowthMB: r1(rssGrow), heapGrowthMB: r1(heapGrow), biggestSnapshotBytes: last.totals.biggestSnapshot, snapshotsSkipped: last.totals.snapshotsSkipped, inputsDropped: last.totals.inputsDropped, viewDelayMs: last.viewDelayMs },
     perPlayer: {
       downBytesPerS: { avg: Math.round(down.reduce((a, b) => a + b, 0) / N), max: Math.round(down.at(-1)), peakSecond: Math.max(...sessions.map(s => s.peakIn)) },
@@ -171,7 +174,7 @@ const results = [];
 for (const name of wanted) results.push(await scenario(name, SOAK || SECONDS, !!SOAK));
 const report = { when: new Date().toISOString(), node: process.version, machine: `${os.cpus()[0]?.model || 'unknown cpu'} x${os.cpus().length}, ${Math.round(os.totalmem() / 2 ** 30)} GB`, note: 'The players run in the same machine as the server and take CPU from it, so server timings here are pessimistic.', results };
 mkdirSync(OUT, { recursive: true });
-const file = resolve(OUT, SOAK ? 'soak.json' : QUICK ? 'quick.json' : 'report.json');
+const file = resolve(OUT, (NAME || (SOAK ? 'soak' : QUICK ? 'quick' : 'report')) + '.json');
 writeFileSync(file, JSON.stringify(report, null, 1));
 const failed = results.flatMap(r => r.gates.filter(g => !g.ok).map(g => `${r.scenario}: ${g.what} (${g.got})`));
 console.log(`\n${failed.length ? 'FAILED\n  ' + failed.join('\n  ') : 'All gates passed.'}\nReport: ${file}`);

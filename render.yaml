@@ -1,0 +1,21 @@
+# Render Blueprint: one free web service running the world server.
+# In Render's dashboard choose New > Blueprint and point it at this repository.
+# The free plan is 0.1 CPU and 512 MB: fine for a small test session, not for a full 64-player world
+# (see docs/HOSTING.md). Not yet deployed or tested.
+services:
+  - type: web
+    name: calder-territory
+    runtime: node
+    plan: free
+    region: oregon                 # pick the region nearest your players; it cannot be changed later
+    buildCommand: npm ci --omit=dev
+    startCommand: node server/src/node/main.js
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: BOTS
+        value: "20"
+      # - key: ORIGINS             # once the client has an address, allow only that page to connect
+      #   value: https://<you>.github.io

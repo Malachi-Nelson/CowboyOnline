@@ -8,7 +8,8 @@ const kb = n => (n >= 10240 ? (n / 1024).toFixed(0) : (n / 1024).toFixed(1)) + '
 export function createHud(store) {
   const el = { hud: $('hud'), wire: $('wire'), radar: $('radar'), hint: $('hint'), pace: $('pace'), ping: $('bPing'), vals: {} };
   for (const d of el.wire.querySelectorAll('[data-k]')) el.vals[d.dataset.k] = d;
-  const ctx = el.radar.getContext('2d');
+  const ctx = el.radar.getContext('2d'), css = getComputedStyle(document.documentElement), tone = {};
+  const col = k => tone[k] || (tone[k] = css.getPropertyValue(k).trim());           // the palette does not change; read each colour once
   let last = null, at = 0, frames = 0, fps = 0, radarAt = 0, worst = 0;
   const set = (k, v, cls) => { const d = el.vals[k]; if (!d) return; if (d.textContent !== v) d.textContent = v; if (cls !== undefined && d.dataset.s !== cls) d.dataset.s = cls; };
 
@@ -25,10 +26,10 @@ export function createHud(store) {
     const rtt = session.rtt, mm = st.errLast * 1000; if (mm > worst) worst = mm;
     set('ping', rtt < 1 ? 'under 1 ms' : rtt.toFixed(0) + ' ms' + (lag ? ' (added)' : ''), rtt > 250 ? 'bad' : rtt > 120 ? 'warn' : 'good');
     set('view', total ? `${session.ents.size} of ${total - 1} others` : `${session.ents.size} others`);
-    set('behind', session.nearDelay.toFixed(0) + ' ms');
+    set('behind', session.nearDelay.toFixed(0) + ' ms ago');
     set('predict', (mm < 0.005 ? '0' : mm.toFixed(2)) + ' mm now, ' + (worst < 0.005 ? '0' : worst.toFixed(2)) + ' worst', worst > 100 ? 'bad' : worst > 10 ? 'warn' : 'good');
     set('fixes', String(st.corrections), st.corrections > 5 ? 'warn' : '');
-    set('ahead', ((session.seq - session.ack - 1) & 65535) + ' inputs');
+    set('ahead', String((session.seq - session.ack - 1) & 65535));
     set('fps', fps.toFixed(0) + ' a second', fps < 45 ? 'bad' : fps < 57 ? 'warn' : 'good');
     const m = session.me, cx = Math.floor(m.x / CHUNK), cz = Math.floor(m.z / CHUNK), d = Math.hypot(m.x - HUB_X, m.z - HUB_Z);
     set('where', `${d.toFixed(0)} m from the hub, square ${cx}.${cz}`);
@@ -39,7 +40,7 @@ export function createHud(store) {
     if (now - radarAt < 90) return; radarAt = now;
     const cv = el.radar, dpr = Math.min(devicePixelRatio || 1, 2), w = cv.clientWidth; if (!w) return;
     if (cv.width !== Math.round(w * dpr)) { cv.width = cv.height = Math.round(w * dpr); }
-    const R = cv.width / 2, css = getComputedStyle(document.documentElement), col = k => css.getPropertyValue(k).trim();
+    const R = cv.width / 2;
     const px = d => Math.sqrt(Math.min(d, VIEW_LEAVE) / VIEW_LEAVE) * (R - 2 * dpr);
     ctx.clearRect(0, 0, cv.width, cv.height); ctx.save(); ctx.translate(R, R);
     ctx.lineWidth = dpr; ctx.font = `${10 * dpr}px ${col('--text')}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';

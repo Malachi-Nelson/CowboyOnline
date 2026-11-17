@@ -142,6 +142,7 @@ export class World {
     c.conn.send(bytes);
   }
   receive(c, u8) {
+    if (!this.clients.has(c)) return;                           // a connection that was closed has nothing more to say
     const n = frameIn(u8.length);
     c.bytesIn += n; c.inAcc += n; this.totals.bytesIn += n;
     if (++c.msgs > FLOOD) { this.kick(c); return; }

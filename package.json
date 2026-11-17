@@ -9,7 +9,8 @@
     "build": "node tools/build-client.mjs",
     "dev": "node tools/build-client.mjs --serve",
     "test": "node --test \"test/*.test.js\"",
-    "loadtest": "node tools/loadtest/run.mjs"
+    "loadtest": "node tools/loadtest/run.mjs",
+    "check:client": "node tools/check-client.mjs"
   },
   "engines": {
     "node": ">=22"
