@@ -6,6 +6,7 @@ import { qPos, dPos, qY, dY, qYaw, dYaw } from '../shared/net/messages.js';
 import { seqDiff, TAU } from '../shared/math.js';
 import { makeField } from '../shared/world/field.js';
 import { makeFoot, stepFoot, FOOT, BTN } from '../shared/sim/moveFoot.js';
+import { SIN16, COS16, sinSmall, cosSmall } from '../shared/sim/trig.js';
 import { HUB_X, HUB_Z, SIM_DT } from '../shared/constants.js';
 
 const field = makeField(1899);
@@ -61,6 +62,14 @@ test('terrain is flat at the hub, rolling beyond it, and the same on every build
   const again = makeField(1899).terrain;
   for (const [x, z] of [[300, 700], [3500, 900], [1234.5, 2345.25]]) assert.equal(again.heightAt(x, z), t.heightAt(x, z));
   assert.notEqual(makeField(7).terrain.heightAt(300, 700), t.heightAt(300, 700));
+});
+
+test('the arithmetic-only sine and cosine match the real ones', () => {
+  let worst = 0;
+  for (let i = 0; i < 65536; i++) { const a = i / 65536 * TAU; worst = Math.max(worst, Math.abs(SIN16[i] - Math.sin(a)), Math.abs(COS16[i] - Math.cos(a))); }
+  assert.ok(worst < 6e-8, `table off by at most ${worst}`);                         // 32-bit rounding and nothing more
+  assert.equal(SIN16[0], 0); assert.equal(COS16[0], 1); assert.equal(SIN16[16384], 1); assert.equal(COS16[32768], -1);
+  for (const a of [0, 0.01, 0.0583, 0.2, 0.25]) { assert.ok(Math.abs(sinSmall(a) - Math.sin(a)) < 1e-10); assert.ok(Math.abs(cosSmall(a) - Math.cos(a)) < 1e-10); }
 });
 
 test('feel: a standing start reaches a sprint in about 0.9 s', () => {

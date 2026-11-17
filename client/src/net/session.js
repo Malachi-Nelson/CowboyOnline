@@ -16,8 +16,8 @@ import { seqDiff } from '../../../shared/math.js';
 import { Remote, intervalFor, isMoving } from './interp.js';
 
 const RING = 256;                // inputs remembered for replay (4.2 s)
-const EPS_POS = 0.01;            // metres of disagreement that count as a misprediction
-const EPS_VEL = 0.05;            // m/s
+const EPS_POS = 0.001;           // metres of disagreement that count as a misprediction. Both sides run the same
+const EPS_VEL = 0.001;           // arithmetic, so the honest answer is normally zero; this only forgives dust.
 const MAX_FRAME = 0.25;          // a frame longer than this is treated as a pause, not as time to catch up on
 const SMOOTH_TAU = 0.1;          // s; how quickly the view glides onto a corrected position
 const SNAP = 3;                  // metres; a correction bigger than this is shown at once

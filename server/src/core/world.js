@@ -345,15 +345,21 @@ export class World {
     return out;
   }
 
+  // forget the peaks and timings so far, so a measurement can start clean
+  resetMetrics() {
+    this.metrics.reset();
+    for (const c of this.clients) { c.outPeak = 0; c.inPeak = 0; }
+    Object.assign(this.totals, { inputsDropped: 0, snapshotsSkipped: 0, biggestSnapshot: 0 });
+  }
   status() {
-    let n = 0, out = 0, peak = 0, inn = 0, inPeak = 0, view = 0;
-    for (const c of this.clients) if (c.player) { n++; out += c.outRate; inn += c.inRate; if (c.outPeak > peak) peak = c.outPeak; if (c.inPeak > inPeak) inPeak = c.inPeak; if (c.view.size > view) view = c.view.size; }
+    let n = 0, out = 0, peak = 0, inn = 0, inPeak = 0, view = 0, delay = 0;
+    for (const c of this.clients) if (c.player) { n++; out += c.outRate; inn += c.inRate; delay += c.viewDelay; if (c.outPeak > peak) peak = c.outPeak; if (c.inPeak > inPeak) inPeak = c.inPeak; if (c.view.size > view) view = c.view.size; }
     return {
       protocol: PROTOCOL_VERSION, tick: this.tick, tickRate: TICK_RATE, uptimeS: Math.round(this.serverNow() / 1000),
       people: this.people.length, connected: n, bots: this.bots.length, entities: this.list.length, maxPlayers: this.opts.maxPlayers,
       tickMs: this.metrics.summary(),
       bytesPerSecond: { outAvg: n ? Math.round(out / n) : 0, outPeak: peak, inAvg: n ? Math.round(inn / n) : 0, inPeak },
-      biggestView: view, totals: this.totals,
+      biggestView: view, viewDelayMs: n ? Math.round(delay / n) : 0, totals: this.totals,
     };
   }
 }

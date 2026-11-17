@@ -1,0 +1,87 @@
+<div id="app">
+<canvas id="view" aria-label="The test range, seen from behind your character"></canvas>
+<div id="tags" aria-hidden="true"></div>
+
+<div id="hud" hidden>
+  <section id="wire" class="plate" aria-label="Connection readout">
+    <h2>Connection</h2>
+    <dl>
+      <div><dt>Ping</dt><dd data-k="ping">measuring</dd></div>
+      <div><dt>Coming down</dt><dd data-k="down">measuring</dd></div>
+      <div><dt>Going up</dt><dd data-k="up">measuring</dd></div>
+      <div><dt>Snapshots</dt><dd data-k="snaps">measuring</dd></div>
+      <div><dt>You are told about</dt><dd data-k="view">nobody yet</dd></div>
+      <div><dt>They are drawn</dt><dd data-k="behind">100 ms</dd></div>
+      <div><dt>Prediction off by</dt><dd data-k="predict">0 mm</dd></div>
+      <div><dt>Corrections</dt><dd data-k="fixes">0</dd></div>
+      <div><dt>Ahead of the server</dt><dd data-k="ahead">0 inputs</dd></div>
+      <div><dt>Frames</dt><dd data-k="fps">measuring</dd></div>
+      <div><dt>You are</dt><dd data-k="where">at the hub</dd></div>
+    </dl>
+  </section>
+
+  <nav id="bar" aria-label="Test controls">
+    <button id="bPing" type="button" title="L"><span class="lg">Added ping</span><span class="sm">Ping</span> <b>none</b></button>
+    <button id="bBands" type="button" aria-pressed="false" title="B"><span class="lg">Colour by range</span><span class="sm">Range</span></button>
+    <button id="bGrid" type="button" aria-pressed="true" title="G"><span class="lg">Survey grid</span><span class="sm">Grid</span></button>
+    <button id="bStats" type="button" aria-pressed="true" title="F3">Readout</button>
+    <button id="bMenu" type="button" title="Esc">Menu</button>
+  </nav>
+
+  <figure id="scope" class="plate">
+    <canvas id="radar" aria-label="Radar of everyone the server is telling you about"></canvas>
+    <figcaption>Updates a second, by range: <span class="k near">20</span><span class="k mid">10</span><span class="k far">5</span><span class="k edge">2</span></figcaption>
+  </figure>
+
+  <p id="hint"><span class="keys-only">W A S D to move · mouse to look · Shift to sprint · Space to jump</span><span class="touch-only">Left thumb moves · right thumb looks</span></p>
+  <p id="pace" aria-live="off">Standing</p>
+
+  <div id="stick" hidden><i></i></div>
+  <div id="thumbs"><button id="tRun" type="button">Run</button><button id="tJump" type="button">Jump</button></div>
+</div>
+
+<main id="menu">
+  <div class="card">
+    <p class="eyebrow">Phase 2 of 11 · Networking test range</p>
+    <h1>Calder Territory</h1>
+    <p class="lede">A whole world is running inside this tab: the same server code that will run on a host, with 63 bots walking about in it. Step in and try the netcode. The real map, the horses and the guns come in later phases.</p>
+    <form id="enter" autocomplete="off">
+      <label for="name">Your name</label>
+      <div class="row">
+        <input id="name" name="name" maxlength="14" spellcheck="false" placeholder="Rider">
+        <button id="play" type="submit" class="primary">Walk in</button>
+      </div>
+    </form>
+    <p id="status" role="status"></p>
+
+    <h2>Three things to try</h2>
+    <ul class="try">
+      <li>Sprint, then throw yourself the other way. The body plants a foot before it turns; it does not spin on the spot.</li>
+      <li>Add 150 ms of ping with <kbd>L</kbd>. Your own movement should feel the same, and <em>Prediction off by</em> should stay at 0 mm.</li>
+      <li>Watch the radar. Bots appear at 384 m, and the farther off they are the less often you are told where they are.</li>
+    </ul>
+
+    <h2>Controls</h2>
+    <dl class="keys">
+      <div class="keys-only"><dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt><dd>Move</dd></div>
+      <div class="keys-only"><dt>Mouse</dt><dd>Look</dd></div>
+      <div class="keys-only"><dt><kbd>Shift</kbd></dt><dd>Sprint</dd></div>
+      <div class="keys-only"><dt><kbd>Space</kbd></dt><dd>Jump</dd></div>
+      <div class="keys-only"><dt><kbd>Z</kbd></dt><dd>Hold a walking pace</dd></div>
+      <div class="keys-only"><dt><kbd>L</kbd><kbd>B</kbd><kbd>G</kbd><kbd>F3</kbd></dt><dd>Ping, range colours, grid, readout</dd></div>
+      <div class="touch-only"><dt>Left thumb</dt><dd>Move. Push a little to walk, all the way to jog.</dd></div>
+      <div class="touch-only"><dt>Right thumb</dt><dd>Look around</dd></div>
+      <div class="touch-only"><dt>Run, Jump</dt><dd>The two round buttons</dd></div>
+    </dl>
+
+    <form id="join" autocomplete="off">
+      <label for="server">Or join a hosted server</label>
+      <div class="row">
+        <input id="server" name="server" inputmode="url" spellcheck="false" placeholder="wss://your-server.example">
+        <button id="bJoin" type="submit">Join</button>
+      </div>
+    </form>
+    <p id="joinNote" class="note" hidden>Joining a hosted server works from the GitHub Pages build. This preview page can only reach the world inside the tab.</p>
+  </div>
+</main>
+</div>

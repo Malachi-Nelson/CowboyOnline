@@ -153,7 +153,7 @@ test('inputs that arrive in bursts still move the body evenly', () => {
     const x = p.s.x; r.run(50); if (i >= 40) steps.push(x - p.s.x);
   }
   const lo = Math.min(...steps), hi = Math.max(...steps), even = FOOT.jog / TICK_RATE;
-  assert.ok(Math.abs(lo - even) < 1e-6 && Math.abs(hi - even) < 1e-6, `per-tick movement ${lo.toFixed(3)}..${hi.toFixed(3)} m, even is ${even.toFixed(3)}`);
+  assert.ok(Math.abs(lo - even) < 1e-3 && Math.abs(hi - even) < 1e-3, `per-tick movement ${lo.toFixed(3)}..${hi.toFixed(3)} m, even is ${even.toFixed(3)}`);
 });
 
 test('where a body was can be asked for, between ticks too', () => {

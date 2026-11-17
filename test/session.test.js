@@ -25,7 +25,7 @@ test('prediction agrees with the server at 160 ms of ping with jitter, walls, st
   assert.equal(s.state, 'playing');
   assert.ok(st.snapshots > 1100 && st.inputs > 3500, `${st.snapshots} snapshots, ${st.inputs} inputs`);
   assert.equal(st.corrections, 0, 'never corrected');
-  assert.ok(st.errMax < 0.001, `largest disagreement ${(st.errMax * 1000).toFixed(3)} mm`);
+  assert.equal(st.errMax, 0, 'client and server agree to the last bit');
   assert.ok(s.rtt > 160 && s.rtt < 215, `ping reads ${s.rtt.toFixed(0)} ms`);
   const p = r.world.people[0], d = Math.hypot(p.s.x - HUB_X, p.s.z - HUB_Z);
   assert.ok(d > 3, 'and it went somewhere');
@@ -123,6 +123,6 @@ test('input numbers wrap at 65,536 without a hiccup', () => {
   r.run(8000);
   assert.ok(s.seq < 1000, `wrapped (now at ${s.seq})`);
   assert.equal(s.stats.corrections, 0, 'no correction on the way through');
-  assert.ok(s.stats.errMax < 0.001, 'and prediction stayed in step');
+  assert.equal(s.stats.errMax, 0, 'and prediction stayed in step');
   assert.equal(r.world.totals.inputsDropped, 0);
 });

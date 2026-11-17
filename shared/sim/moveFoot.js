@@ -6,8 +6,12 @@
 //   standing start to a sprint     about 0.9 s
 //   sprint to a stop               0.4 s and about 1.3 m
 //   turning at a sprint            an arc of about 2 m radius
+//
+// Two rules keep every machine in step. The step uses only +, -, *, / and Math.sqrt (see trig.js), which give the
+// same bits everywhere. And the state is rounded to 32-bit floats at the end of each step, which is exactly what
+// a snapshot carries, so a client that is put right by the server holds the very same numbers the server does.
 import { SIM_DT, WORLD_SIZE } from '../constants.js';
-import { TAU } from '../math.js';
+import { SIN16, COS16, sinSmall, cosSmall } from './trig.js';
 
 export const FOOT = {
   r: 0.34, h: 1.78, step: 0.45,
@@ -33,7 +37,7 @@ export function stepFoot(s, cmd, field) {
   const fwd = cmd.mz / 127, str = cmd.mx / 127, ml = Math.sqrt(fwd * fwd + str * str);
   let wx = 0, wz = 0, wish = 0;
   if (ml > 0.05) {
-    const yaw = cmd.yaw * (TAU / 65536), sn = Math.sin(yaw), cs = Math.cos(yaw), k = 1 / ml;
+    const sn = SIN16[cmd.yaw & 65535], cs = COS16[cmd.yaw & 65535], k = 1 / ml;
     wx = (-sn * fwd + cs * str) * k; wz = (-cs * fwd - sn * str) * k;
     wish = ((btn & BTN.SPRINT) && fwd > 0.5 ? F.sprint : (btn & BTN.WALK) ? F.walk : F.jog) * (ml < 1 ? ml : 1);
   }
@@ -48,11 +52,10 @@ export function stepFoot(s, cmd, field) {
       else {
         const grade = field.terrain.heightAt(s.x + hx, s.z + hz) - field.terrain.heightAt(s.x, s.z);
         if (grade > 0) wish *= 1 - (grade * F.uphill > 0.6 ? 0.6 : grade * F.uphill);
-        const ang = Math.atan2(hx * wz - hz * wx, dot);
-        const lim = (F.turnSlow + (F.turnFast - F.turnSlow) * (sp >= F.sprint ? 1 : sp / F.sprint)) * dt;
-        const a = ang > lim ? lim : ang < -lim ? -lim : ang, ca = Math.cos(a), sa = Math.sin(a);
-        const nx = hx * ca - hz * sa, nz = hx * sa + hz * ca;
-        hx = nx; hz = nz;
+        // swing the heading toward where it is told to go, by no more than the turn rate allows
+        const lim = (F.turnSlow + (F.turnFast - F.turnSlow) * (sp >= F.sprint ? 1 : sp / F.sprint)) * dt, ca = cosSmall(lim);
+        if (dot >= ca) { hx = wx; hz = wz; }
+        else { const sa = hx * wz - hz * wx >= 0 ? sinSmall(lim) : -sinSmall(lim), nx = hx * ca - hz * sa; hz = hx * sa + hz * ca; hx = nx; }
         if (sp < wish) { sp += F.accel * dt; if (sp > wish) sp = wish; }
         else if (sp > wish) { sp -= F.decel * 0.5 * dt; if (sp < wish) sp = wish; }
       }
@@ -96,4 +99,6 @@ export function stepFoot(s, cmd, field) {
     const ny = s.y + s.vy * dt;
     if (ny <= g) { s.y = g; s.vy = 0; s.ground = 1; } else s.y = ny;
   }
+  const f = Math.fround;
+  s.x = f(s.x); s.y = f(s.y); s.z = f(s.z); s.vx = f(s.vx); s.vy = f(s.vy); s.vz = f(s.vz);
 }

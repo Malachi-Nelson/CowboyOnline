@@ -6,6 +6,7 @@
 //   BOTS     bots to keep in the world (default 63; they make room as people join)
 //   SPAWN    hub | spread (spread scatters everyone over the whole map; used by the load test)
 //   ORIGINS  comma-separated list of page origins allowed to connect (default: any)
+//   ALLOW_RESET=1 lets /reset-metrics clear the timings (the load test uses it; leave it off when hosting)
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { World } from '../core/world.js';
@@ -27,6 +28,7 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ ...world.status(), process: { node: process.version, upS: Math.round((Date.now() - started) / 1000), rssMB: Math.round(mem.rss / 1048576 * 10) / 10, heapMB: Math.round(mem.heapUsed / 1048576 * 10) / 10, cpuMs: Math.round((cpu.user + cpu.system) / 1000) } }));
     return;
   }
+  if (path === '/reset-metrics' && process.env.ALLOW_RESET === '1') { world.resetMetrics(); res.writeHead(200, head); res.end('ok'); return; }
   res.writeHead(200, { ...head, 'content-type': 'text/plain' });
   res.end('Calder Territory game server. Connect with the game client; see /status.\n');
 });

@@ -19,6 +19,6 @@
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
-    "three": "0.187.0"
+    "three": "0.128.0"
   }
 }
