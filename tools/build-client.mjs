@@ -16,7 +16,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..'), args = proc
 const THREE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
 const FONTS = 'https://fonts.googleapis.com/css2?family=Besley:wght@500;800&family=Libre+Franklin:wght@400;500;600&display=swap';
 const TITLE = 'Cowboy Online';
-const ABOUT = 'Cowboy Online: a frontier open world for the browser, set in Calder Territory in 1899. This is the Phase 2 networking test range.';
+const ABOUT = 'Cowboy Online: a frontier open world for the browser, set in Calder Territory in 1899. Ride out from a river town into plains, forest, mountains, swamp and desert, with a horse that comes when you whistle.';
 // a brass star on lamp-black, drawn inline so the page asks the network for nothing but three.js and its fonts
 const ICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%2314110d'/%3E%3Cpath fill='%23dba64c' d='M32 9l6.2 15.4 16.6 1.2-12.8 10.7 4 16.2L32 43.6 18 52.5l4-16.2L9.2 25.6l16.6-1.2z'/%3E%3C/svg%3E";
 

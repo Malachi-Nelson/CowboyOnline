@@ -1,0 +1,368 @@
+{
+ "when": "2026-11-18T17:08:28.369Z",
+ "node": "v22.23.4",
+ "machine": "Intel(R) Xeon(R) Processor @ 2.10GHz x2, 8 GB",
+ "note": "The players run in the same machine as the server and take CPU from it, so server timings here are pessimistic.",
+ "results": [
+  {
+   "scenario": "street",
+   "about": "everyone and their horses within 30 m of one spot on the main street: the worst case for bandwidth",
+   "players": 64,
+   "bots": 0,
+   "playing": 64,
+   "seconds": 60,
+   "pingMs": 150,
+   "jitterMs": 20,
+   "measuredPingMs": 173,
+   "server": {
+    "tickMs": {
+     "n": 1201,
+     "avg": 1.991,
+     "p50": 1.831,
+     "p95": 2.923,
+     "p99": 4.42,
+     "max": 8.677
+    },
+    "cpuPercentOfOneCore": 8.9,
+    "cpuPercentPerPlayer": 0.14,
+    "rssMB": 111.2,
+    "heapMB": 14.6,
+    "rssGrowthMB": 0.2,
+    "heapGrowthMB": 0.1,
+    "biggestSnapshotBytes": 510,
+    "snapshotsSkipped": 0,
+    "inputsDropped": 0,
+    "viewDelayMs": 273
+   },
+   "perPlayer": {
+    "downBytesPerS": {
+     "avg": 8713,
+     "max": 9092,
+     "peakSecond": 10405,
+     "peakSecondCountedByServer": 9914
+    },
+    "upBytesPerS": {
+     "avg": 555,
+     "max": 555,
+     "peakSecond": 589,
+     "peakSecondCountedByServer": 582
+    },
+    "snapshotsPerS": 20,
+    "inView": {
+     "avg": 126,
+     "max": 126
+    }
+   },
+   "prediction": {
+    "samples": 76806,
+    "p50mm": 0,
+    "p99mm": 0,
+    "p999mm": 0,
+    "maxMm": 0,
+    "corrections": 0,
+    "over1cm": 0,
+    "over10cm": 0
+   },
+   "othersDrawn": {
+    "within60m": {
+     "n": 10859,
+     "p50cm": 1.1,
+     "p99cm": 1.9,
+     "maxCm": 132.9
+    },
+    "to150m": {
+     "n": 85,
+     "p50cm": 1.1,
+     "p99cm": 2.2,
+     "maxCm": 2.2
+    },
+    "beyond": {
+     "n": 0,
+     "p50cm": 0,
+     "p99cm": 0,
+     "maxCm": 0
+    },
+    "framesWaitingForAnUpdatePercent": 0.001,
+    "unknownUpdates": 0
+   },
+   "memoryAtEnd": {
+    "rssMB": 111.2,
+    "heapMB": 14.6,
+    "heapTotalMB": 29.6,
+    "externalMB": 25.7
+   },
+   "gates": [
+    {
+     "what": "server tick p99 <= 25 ms",
+     "ok": true,
+     "got": "4.42 ms (max 8.677 ms)"
+    },
+    {
+     "what": "no player sent more than 16 KB in a second",
+     "ok": true,
+     "got": "9914 bytes by the server's count, 10405 by the players'"
+    },
+    {
+     "what": "no player sends more than 2 KB a second",
+     "ok": true,
+     "got": "582 bytes by the server's count, 589 by the players'"
+    },
+    {
+     "what": "prediction within 10 cm",
+     "ok": true,
+     "got": "largest 0 mm over 76806 snapshots"
+    },
+    {
+     "what": "everyone stayed connected",
+     "ok": true,
+     "got": "64 of 64"
+    },
+    {
+     "what": "no update for an unknown entity",
+     "ok": true,
+     "got": "0"
+    }
+   ]
+  },
+  {
+   "scenario": "town",
+   "about": "everyone in and around Calder's Landing: a busy town",
+   "players": 64,
+   "bots": 0,
+   "playing": 64,
+   "seconds": 60,
+   "pingMs": 150,
+   "jitterMs": 20,
+   "measuredPingMs": 175,
+   "server": {
+    "tickMs": {
+     "n": 1200,
+     "avg": 2.001,
+     "p50": 1.884,
+     "p95": 2.855,
+     "p99": 3.665,
+     "max": 6.947
+    },
+    "cpuPercentOfOneCore": 9.2,
+    "cpuPercentPerPlayer": 0.144,
+    "rssMB": 109.7,
+    "heapMB": 14.3,
+    "rssGrowthMB": 0.1,
+    "heapGrowthMB": 4.4,
+    "biggestSnapshotBytes": 465,
+    "snapshotsSkipped": 0,
+    "inputsDropped": 0,
+    "viewDelayMs": 272
+   },
+   "perPlayer": {
+    "downBytesPerS": {
+     "avg": 6402,
+     "max": 7292,
+     "peakSecond": 9415,
+     "peakSecondCountedByServer": 9102
+    },
+    "upBytesPerS": {
+     "avg": 555,
+     "max": 555,
+     "peakSecond": 582,
+     "peakSecondCountedByServer": 597
+    },
+    "snapshotsPerS": 20,
+    "inView": {
+     "avg": 126,
+     "max": 126
+    }
+   },
+   "prediction": {
+    "samples": 76820,
+    "p50mm": 0,
+    "p99mm": 0,
+    "p999mm": 0,
+    "maxMm": 0,
+    "corrections": 0,
+    "over1cm": 0,
+    "over10cm": 0
+   },
+   "othersDrawn": {
+    "within60m": {
+     "n": 4056,
+     "p50cm": 1.1,
+     "p99cm": 2,
+     "maxCm": 116.9
+    },
+    "to150m": {
+     "n": 5463,
+     "p50cm": 1.1,
+     "p99cm": 3.3,
+     "maxCm": 4304.6
+    },
+    "beyond": {
+     "n": 1420,
+     "p50cm": 1.1,
+     "p99cm": 7.4,
+     "maxCm": 2384.1
+    },
+    "framesWaitingForAnUpdatePercent": 0.001,
+    "unknownUpdates": 0
+   },
+   "memoryAtEnd": {
+    "rssMB": 109.7,
+    "heapMB": 14.3,
+    "heapTotalMB": 29.9,
+    "externalMB": 25.5
+   },
+   "gates": [
+    {
+     "what": "server tick p99 <= 25 ms",
+     "ok": true,
+     "got": "3.665 ms (max 6.947 ms)"
+    },
+    {
+     "what": "no player sent more than 16 KB in a second",
+     "ok": true,
+     "got": "9102 bytes by the server's count, 9415 by the players'"
+    },
+    {
+     "what": "no player sends more than 2 KB a second",
+     "ok": true,
+     "got": "597 bytes by the server's count, 582 by the players'"
+    },
+    {
+     "what": "prediction within 10 cm",
+     "ok": true,
+     "got": "largest 0 mm over 76820 snapshots"
+    },
+    {
+     "what": "everyone stayed connected",
+     "ok": true,
+     "got": "64 of 64"
+    },
+    {
+     "what": "no update for an unknown entity",
+     "ok": true,
+     "got": "0"
+    }
+   ]
+  },
+  {
+   "scenario": "spread",
+   "about": "everyone scattered over the whole map: the usual case",
+   "players": 64,
+   "bots": 0,
+   "playing": 64,
+   "seconds": 60,
+   "pingMs": 150,
+   "jitterMs": 20,
+   "measuredPingMs": 173,
+   "server": {
+    "tickMs": {
+     "n": 1200,
+     "avg": 1.155,
+     "p50": 1.045,
+     "p95": 1.709,
+     "p99": 2.681,
+     "max": 6.958
+    },
+    "cpuPercentOfOneCore": 7.4,
+    "cpuPercentPerPlayer": 0.116,
+    "rssMB": 101.2,
+    "heapMB": 12.7,
+    "rssGrowthMB": 0.6,
+    "heapGrowthMB": 0.9,
+    "biggestSnapshotBytes": 154,
+    "snapshotsSkipped": 0,
+    "inputsDropped": 0,
+    "viewDelayMs": 270
+   },
+   "perPlayer": {
+    "downBytesPerS": {
+     "avg": 1295,
+     "max": 1745,
+     "peakSecond": 1875,
+     "peakSecondCountedByServer": 1881
+    },
+    "upBytesPerS": {
+     "avg": 555,
+     "max": 555,
+     "peakSecond": 582,
+     "peakSecondCountedByServer": 597
+    },
+    "snapshotsPerS": 20,
+    "inView": {
+     "avg": 4.6,
+     "max": 12
+    }
+   },
+   "prediction": {
+    "samples": 76800,
+    "p50mm": 0,
+    "p99mm": 0,
+    "p999mm": 0,
+    "maxMm": 0,
+    "corrections": 0,
+    "over1cm": 0,
+    "over10cm": 0
+   },
+   "othersDrawn": {
+    "within60m": {
+     "n": 209,
+     "p50cm": 1.4,
+     "p99cm": 1.9,
+     "maxCm": 1.9
+    },
+    "to150m": {
+     "n": 1545,
+     "p50cm": 1,
+     "p99cm": 2.1,
+     "maxCm": 261.5
+    },
+    "beyond": {
+     "n": 7918,
+     "p50cm": 1.1,
+     "p99cm": 19.3,
+     "maxCm": 3761.5
+    },
+    "framesWaitingForAnUpdatePercent": 0.078,
+    "unknownUpdates": 0
+   },
+   "memoryAtEnd": {
+    "rssMB": 101.2,
+    "heapMB": 12.7,
+    "heapTotalMB": 21.4,
+    "externalMB": 25.6
+   },
+   "gates": [
+    {
+     "what": "server tick p99 <= 25 ms",
+     "ok": true,
+     "got": "2.681 ms (max 6.958 ms)"
+    },
+    {
+     "what": "no player sent more than 16 KB in a second",
+     "ok": true,
+     "got": "1881 bytes by the server's count, 1875 by the players'"
+    },
+    {
+     "what": "no player sends more than 2 KB a second",
+     "ok": true,
+     "got": "597 bytes by the server's count, 582 by the players'"
+    },
+    {
+     "what": "prediction within 10 cm",
+     "ok": true,
+     "got": "largest 0 mm over 76800 snapshots"
+    },
+    {
+     "what": "everyone stayed connected",
+     "ok": true,
+     "got": "64 of 64"
+    },
+    {
+     "what": "no update for an unknown entity",
+     "ok": true,
+     "got": "0"
+    }
+   ]
+  }
+ ]
+}

@@ -27,8 +27,11 @@ export class Remote {
     this.x = 0; this.y = 0; this.z = 0; this.yaw = 0;                        // where it is drawn this frame
     this.vx = 0; this.vz = 0;                                                // how fast it is drawn moving, for animation
     this.delay = 0; this.ival = TICK_MS; this.late = 0;
+    this.owner = 0; this.mount = null;                                       // a horse's owner; a rider's horse while they are on it
     this.slot = -1;                                                          // for the renderer
   }
+  // forget every sample: what comes next is somewhere else, not further along
+  reset() { this.head = -1; this.n = 0; }
   get newest() { return this.head < 0 ? -Infinity : this.t[this.head]; }
   push(t, x, y, z, yaw, moving) {
     if (this.head >= 0 && t <= this.t[this.head]) { if (t < this.t[this.head]) return; }   // same instant: overwrite; older: ignore

@@ -5,17 +5,19 @@
 //   PORT     port to listen on (default 8080; hosts such as Render set this for you)
 //   BOTS     bots to keep in the world (default 63; they make room as people join)
 //   SPAWN    hub | spread (spread scatters everyone over the whole map; used by the load test)
+//   ROAM     if set, bots mill about within this many metres of the hub instead of living their lives (load test)
+//   HOUR     the hour of the day the world starts at (default 8)
 //   ORIGINS  comma-separated list of page origins allowed to connect (default: any)
 //   ALLOW_RESET=1 lets /reset-metrics clear the timings (the load test uses it; leave it off when hosting)
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { World } from '../core/world.js';
-import { MAX_PLAYERS } from '../../../shared/constants.js';
+import { MAX_PLAYERS, DAY_START_HOUR } from '../../../shared/constants.js';
 
 const num = (v, d) => (v === undefined || v === '' || Number.isNaN(+v) ? d : +v);
 const PORT = num(process.env.PORT, 8080);
 const ORIGINS = (process.env.ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
-const world = new World({ bots: num(process.env.BOTS, 63), spawn: process.env.SPAWN === 'spread' ? 'spread' : 'hub', maxPlayers: num(process.env.MAX_PLAYERS, MAX_PLAYERS) });
+const world = new World({ bots: num(process.env.BOTS, 63), spawn: process.env.SPAWN === 'spread' ? 'spread' : 'hub', roam: num(process.env.ROAM, 0), hour: num(process.env.HOUR, DAY_START_HOUR), maxPlayers: num(process.env.MAX_PLAYERS, MAX_PLAYERS) });
 const started = Date.now();
 
 const server = http.createServer((req, res) => {

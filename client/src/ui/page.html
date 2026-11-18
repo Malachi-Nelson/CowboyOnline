@@ -1,9 +1,11 @@
 <div id="app">
-<canvas id="view" tabindex="0" aria-label="The test range, seen from behind your character"></canvas>
+<canvas id="view" tabindex="0" aria-label="Calder Territory, seen from behind your character"></canvas>
 <div id="tags" aria-hidden="true"></div>
 
 <div id="hud" hidden>
-  <section id="wire" class="plate" aria-label="Connection readout">
+  <div id="place" hidden><span class="name"></span><span class="sub"></span></div>
+
+  <section id="wire" class="plate" aria-label="Connection readout" hidden>
     <h2>Connection</h2>
     <dl>
       <div><dt>Ping</dt><dd data-k="ping">measuring</dd></div>
@@ -20,60 +22,74 @@
     </dl>
   </section>
 
-  <nav id="bar" aria-label="Test controls">
+  <nav id="bar" aria-label="Test controls" hidden>
     <button id="bPing" type="button" title="L"><span class="lg">Added ping</span><span class="sm">Ping</span> <b>none</b></button>
     <button id="bBands" type="button" aria-pressed="false" title="B"><span class="lg">Colour by range</span><span class="sm">Range</span></button>
-    <button id="bGrid" type="button" aria-pressed="true" title="G"><span class="lg">Survey grid</span><span class="sm">Grid</span></button>
-    <button id="bStats" type="button" aria-pressed="true" title="F3">Readout</button>
+    <button id="bGrid" type="button" aria-pressed="false" title="G"><span class="lg">Survey grid</span><span class="sm">Grid</span></button>
+    <button id="bStats" type="button" aria-pressed="false" title="F3">Instruments</button>
     <button id="bMenu" type="button" title="Esc">Menu</button>
   </nav>
 
-  <figure id="scope" class="plate">
-    <canvas id="radar" aria-label="Radar of everyone the server is telling you about"></canvas>
-    <figcaption>Updates a second, by range: <span class="k near">20</span><span class="k mid">10</span><span class="k far">5</span><span class="k edge">2</span></figcaption>
+  <figure id="mini">
+    <canvas id="minimap" aria-label="Map of the country around you"></canvas>
+    <figcaption id="clock">8:00 am</figcaption>
+    <div id="horseCore" class="core" hidden title="Your horse's wind">
+      <svg viewBox="0 0 44 44" aria-hidden="true"><circle class="track" cx="22" cy="22" r="18"/><circle id="coreRing" class="fill" cx="22" cy="22" r="18"/>
+        <path class="glyph" d="M16 31c0-4 1-7 3-9l-3-2c-1-1 0-3 1-3l5 1 3-4c1-1 2 0 2 1v3c2 1 3 3 3 5l-2 1-2-2-2 3v6z"/></svg>
+    </div>
   </figure>
 
-  <p id="hint"><span class="keys-only">W A S D to move · <span class="lock-only">mouse to look</span><span class="drag-only">hold the mouse button and drag to look</span> · Shift to sprint · Space to jump</span><span class="touch-only">Left thumb moves · right thumb looks</span></p>
-  <p id="pace" aria-live="off">Standing</p>
+  <ul id="prompts" aria-live="polite"></ul>
+
+  <p id="hint"><span class="keys-only">W A S D to move · <span class="lock-only">mouse to look</span><span class="drag-only">hold the mouse button and drag to look</span> · <b>H</b> whistles for your horse · <b>E</b> to mount</span><span class="touch-only">Left thumb moves · right thumb looks · Whistle calls your horse</span></p>
+  <p id="pace" aria-live="off" hidden>Standing</p>
 
   <div id="stick" hidden><i></i></div>
-  <div id="thumbs"><button id="tRun" type="button">Run</button><button id="tJump" type="button">Jump</button></div>
+  <div id="thumbs"><button id="tWhistle" type="button">Whistle</button><button id="tUse" type="button">Mount</button><button id="tRun" type="button">Run</button><button id="tJump" type="button">Jump</button></div>
+</div>
+
+<div id="map" hidden>
+  <div class="mapbar"><span class="title">Calder Territory</span><span id="mapTime"></span><span class="tools"><button id="mapZoomOut" type="button" aria-label="Zoom out">−</button><button id="mapZoomIn" type="button" aria-label="Zoom in">+</button><button id="mapClose" type="button">Close <kbd>M</kbd></button></span></div>
+  <canvas id="mapCanvas" aria-label="Map of Calder Territory"></canvas>
 </div>
 
 <main id="menu">
   <div class="card">
-    <p class="eyebrow">Phase 2 of 11 · Networking test range</p>
+    <p class="eyebrow">Phase 3 of 11 · The territory and your horse</p>
     <h1>Cowboy Online</h1>
     <p class="where">Calder Territory, 1899</p>
-    <p class="lede">A whole world is running inside this tab: the same server code that will run on a host, with 63 bots walking about in it. Step in and try the netcode. The real map, the horses and the guns come in later phases.</p>
+    <p class="lede">Sixteen square kilometres of plains, pine forest, mountains, high snow country, swamp and desert, a river town and four smaller places, with townsfolk on the streets and riders on the roads. You start on the main street of Calder's Landing with your horse beside you. All of it runs inside this tab.</p>
     <form id="enter" autocomplete="off">
       <label for="name">Your name</label>
       <div class="row">
         <input id="name" name="name" maxlength="14" spellcheck="false" placeholder="Rider">
-        <button id="play" type="submit" class="primary">Walk in</button>
+        <button id="play" type="submit" class="primary">Ride out</button>
       </div>
     </form>
-    <label class="check" for="sound"><input id="sound" name="sound" type="checkbox" checked> Footsteps (sound)</label>
+    <label class="check" for="sound"><input id="sound" name="sound" type="checkbox" checked> Sound</label>
     <p id="status" role="status"></p>
 
-    <h2>Three things to try</h2>
+    <h2>Things to try</h2>
     <ul class="try">
-      <li>Sprint, then throw yourself the other way. The body plants a foot before it turns; it does not spin on the spot.</li>
-      <li>Add 150 ms of ping with <kbd>L</kbd>. Your own movement should feel the same, and <em>Prediction off by</em> should stay at 0 mm.</li>
-      <li>Watch the radar. Bots appear at 384 m, and the farther off they are the less often you are told where they are.</li>
+      <li>Walk away from your horse, then <span class="keys-only">press <kbd>H</kbd></span><span class="touch-only">tap Whistle</span>. It comes at a run. Call it from too far off and it is brought in behind you, out of sight, and runs the rest.</li>
+      <li>Gallop with <span class="keys-only"><kbd>Shift</kbd></span><span class="touch-only">the Gallop button</span>. The ring by the map empties; after half a minute the horse is winded and needs its breath back.</li>
+      <li>Take the north road into the mountains, or the bridge east and down into the Mirewood. A day lasts 48 minutes, and the weather comes and goes.</li>
     </ul>
 
     <h2>Controls</h2>
     <dl class="keys">
-      <div class="keys-only"><dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt><dd>Move</dd></div>
+      <div class="keys-only"><dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt><dd>Move, steer the horse</dd></div>
       <div class="keys-only"><dt>Mouse</dt><dd>Look</dd></div>
-      <div class="keys-only"><dt><kbd>Shift</kbd></dt><dd>Sprint</dd></div>
+      <div class="keys-only"><dt><kbd>H</kbd></dt><dd>Whistle for your horse</dd></div>
+      <div class="keys-only"><dt><kbd>E</kbd></dt><dd>Mount, dismount</dd></div>
+      <div class="keys-only"><dt><kbd>Shift</kbd></dt><dd>Sprint, gallop</dd></div>
+      <div class="keys-only"><dt><kbd>Z</kbd></dt><dd>Walk, trot</dd></div>
       <div class="keys-only"><dt><kbd>Space</kbd></dt><dd>Jump</dd></div>
-      <div class="keys-only"><dt><kbd>Z</kbd></dt><dd>Hold a walking pace</dd></div>
-      <div class="keys-only"><dt><kbd>L</kbd><kbd>B</kbd><kbd>G</kbd><kbd>F3</kbd></dt><dd>Ping, range colours, grid, readout</dd></div>
-      <div class="touch-only"><dt>Left thumb</dt><dd>Move. Push a little to walk, all the way to jog.</dd></div>
+      <div class="keys-only"><dt><kbd>M</kbd></dt><dd>Map</dd></div>
+      <div class="keys-only"><dt><kbd>F3</kbd></dt><dd>Instruments: ping, prediction, range colours</dd></div>
+      <div class="touch-only"><dt>Left thumb</dt><dd>Move. Push a little to walk, all the way to run.</dd></div>
       <div class="touch-only"><dt>Right thumb</dt><dd>Look around</dd></div>
-      <div class="touch-only"><dt>Run, Jump</dt><dd>The two round buttons</dd></div>
+      <div class="touch-only"><dt>Buttons</dt><dd>Whistle, mount, run or gallop, jump</dd></div>
     </dl>
 
     <details id="joinBox">

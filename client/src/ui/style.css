@@ -50,11 +50,39 @@ kbd { font: 600 0.78em/1 var(--text); padding: 0.28em 0.5em; border: 1px solid v
 #bar b { font-weight: 600; color: var(--brass); font-variant-numeric: tabular-nums; }
 #bar .sm { display: none; }
 
-#scope { position: fixed; left: var(--gutter-l); bottom: var(--bottom); margin: 0; padding: 8px 8px 6px; width: 11.5rem; box-sizing: border-box; }
-#radar { display: block; width: 100%; aspect-ratio: 1; max-width: 100%; }
-#scope figcaption { margin-top: 5px; font-size: 0.7rem; line-height: 1.35; color: var(--dim); }
-.k { display: inline-block; margin-left: 5px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.k.near { color: var(--near); } .k.mid { color: var(--mid); } .k.far { color: var(--far); } .k.edge { color: var(--edge); }
+/* the round map, bottom left, with the time under it and the horse's wind beside it */
+#mini { position: fixed; left: var(--gutter-l); bottom: var(--bottom); margin: 0; width: 11rem; }
+#minimap { display: block; width: 100%; aspect-ratio: 1; max-width: 100%; border-radius: 50%; box-shadow: 0 2px 14px rgba(0, 0, 0, 0.45); background: rgba(20, 17, 13, 0.6); }
+#clock { position: absolute; left: 50%; bottom: -4px; transform: translateX(-50%); padding: 2px 9px; border-radius: 10px; background: var(--plate); font: 600 0.74rem/1.3 var(--text); font-variant-numeric: tabular-nums; letter-spacing: 0.03em; white-space: nowrap; }
+.core { position: absolute; left: calc(100% + 8px); bottom: 6px; width: 3rem; height: 3rem; }
+.core svg { width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; }
+.core .track { fill: rgba(20, 17, 13, 0.72); stroke: rgba(239, 230, 210, 0.2); stroke-width: 4; }
+.core .fill { fill: none; stroke: var(--ink); stroke-width: 4; stroke-dasharray: 113.1; stroke-linecap: round; transition: stroke 0.3s; }
+.core .glyph { fill: var(--ink); transform: rotate(90deg); transform-origin: 22px 22px; }
+.core[data-s="low"] .fill { stroke: var(--warn); } .core[data-s="winded"] .fill, .core[data-s="winded"] .glyph { stroke: var(--bad); fill: var(--bad); }
+.core[data-s="winded"] .fill { fill: none; }
+
+/* what the keys do now, bottom right */
+#prompts { position: fixed; right: var(--gutter-r); bottom: var(--bottom); margin: 0; padding: 0; list-style: none; display: grid; justify-items: end; gap: 5px; pointer-events: none; }
+#prompts li { display: flex; align-items: center; gap: 8px; padding: 4px 10px 4px 5px; background: var(--plate); border-radius: 3px; font-size: 0.84rem; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
+#prompts li.warn { color: var(--bad); }
+#prompts kbd { min-width: 1.1em; text-align: center; background: rgba(239, 230, 210, 0.12); }
+
+/* a place's name, as you ride into it */
+#place { position: fixed; left: 50%; top: calc(var(--top) + 6vh); transform: translateX(-50%); display: grid; justify-items: center; gap: 2px; pointer-events: none; text-align: center; transition: opacity 1.2s; text-shadow: 0 2px 10px rgba(0, 0, 0, 0.75), 0 1px 2px rgba(0, 0, 0, 0.8); max-width: calc(100vw - 32px); }
+#place .name { font: 800 clamp(1.6rem, 4.6vw, 2.6rem)/1.05 var(--display); letter-spacing: 0.01em; }
+#place .sub { font: 500 0.82rem/1.3 var(--text); letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); }
+#place.gone { opacity: 0; }
+
+/* the full map */
+#map { position: fixed; inset: 0; background: rgba(14, 12, 9, 0.94); display: grid; grid-template-rows: auto 1fr; z-index: 5; }
+#mapCanvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; min-height: 0; }
+.mapbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: calc(10px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px)); }
+.mapbar .title { font: 800 1.25rem/1.1 var(--display); }
+#mapTime { color: var(--dim); font-variant-numeric: tabular-nums; font-size: 0.86rem; }
+.mapbar .tools { margin-left: auto; display: flex; gap: 6px; }
+.mapbar button { background: var(--plate); border: 1px solid var(--line); border-radius: 3px; padding: 5px 11px; font-size: 0.86rem; cursor: pointer; }
+.mapbar button:hover { border-color: var(--brass); }
 
 #pace, #hint { position: fixed; left: 50%; transform: translateX(-50%); margin: 0; text-align: center; pointer-events: none; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85); max-width: calc(100vw - 32px); }
 #pace { bottom: var(--bottom); font-size: 0.8rem; color: var(--ink); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
@@ -64,9 +92,10 @@ kbd { font: 600 0.78em/1 var(--text); padding: 0.28em 0.5em; border: 1px solid v
 /* ---- touch */
 #stick { position: fixed; width: 112px; height: 112px; margin: -56px 0 0 -56px; border: 1px solid var(--line); border-radius: 50%; background: rgba(22, 18, 13, 0.35); pointer-events: none; }
 #stick i { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; background: rgba(239, 230, 210, 0.55); }
-#thumbs { display: none; position: fixed; right: var(--gutter-r); bottom: calc(var(--bottom) + 1.6rem); gap: 10px; }
-.touch #thumbs { display: flex; }
-#thumbs button { width: 64px; height: 64px; border-radius: 50%; border: 1px solid var(--line); background: var(--plate); font-size: 0.8rem; font-weight: 600; touch-action: none; }
+#thumbs { display: none; position: fixed; right: var(--gutter-r); bottom: calc(var(--bottom) + 4.6rem); gap: 8px; grid-template-columns: repeat(2, 60px); }
+.touch #thumbs { display: grid; }
+.touch #prompts { display: none; }
+#thumbs button { width: 60px; height: 60px; border-radius: 50%; border: 1px solid var(--line); background: var(--plate); font-size: 0.74rem; font-weight: 600; touch-action: none; padding: 0; }
 #thumbs button.on { border-color: var(--brass); color: var(--brass); }
 
 /* names over other players */
@@ -114,11 +143,11 @@ details[open] summary { margin-bottom: 8px; }
   #bar { flex-wrap: nowrap; left: var(--gutter-l); max-width: none; }
   #bar button { padding: 6px 8px; font-size: 0.76rem; white-space: nowrap; }
   #bar .lg { display: none; } #bar .sm { display: inline; }
-  #wire { top: calc(var(--top) + 42px); }
-  #scope { left: auto; right: var(--gutter-r); bottom: auto; top: calc(var(--top) + 42px); width: 8.2rem; }
-  #scope figcaption { display: none; }
-  #wire { width: min(15.5rem, calc(100vw - 8.2rem - 44px)); padding: 8px 10px 6px; }
+  #wire { top: calc(var(--top) + 42px); width: min(15.5rem, calc(100vw - 32px)); padding: 8px 10px 6px; }
+  #mini { width: 7.6rem; bottom: auto; top: var(--top); left: var(--gutter-l); }
+  .core { left: auto; right: -3.4rem; bottom: auto; top: 0; width: 2.6rem; height: 2.6rem; }
+  #place { top: calc(var(--top) + 9.5rem); }
   #wire dl { font-size: 0.74rem; }
-  #hint { bottom: calc(var(--bottom) + 6.6rem); }
+  #hint { bottom: calc(var(--bottom) + 15rem); }
 }
-@media (prefers-reduced-motion: reduce) { #hint { transition: none; } }
+@media (prefers-reduced-motion: reduce) { #hint, #place { transition: none; } }

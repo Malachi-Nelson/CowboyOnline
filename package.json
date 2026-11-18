@@ -1,6 +1,6 @@
 {
   "name": "cowboy-online",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Cowboy Online: a frontier open world for the browser, set in Calder Territory in 1899. Authoritative server, shared simulation, three.js client.",

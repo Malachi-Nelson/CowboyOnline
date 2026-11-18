@@ -9,8 +9,9 @@ The client is a single static file and lives on GitHub Pages at no cost:
 
 ## 1. In the browser tab
 
-Open the page. The server's core runs in a worker inside the tab, with 63 bots. Nothing to host, no account.
-One player. This is also how everything gets tested.
+Open the page. The server's core runs in a worker inside the tab, with 63 bots: townsfolk and riders. Nothing to
+host, no account. One player. This is also how everything gets tested. The tab lays out the whole territory
+twice at start-up, once for the world and once for drawing it, which takes a second or two on a laptop.
 
 ## 2. Your own PC, behind a Cloudflare quick tunnel
 
@@ -48,9 +49,9 @@ card needed. A free service is stopped after 15 minutes without an incoming requ
 takes about a minute to wake when someone next connects. Since February 2026 an open game connection counts as
 activity, so a world stays up while anyone is in it, and is empty when it sleeps.
 
-**How many players it can carry.** In the load test the server used about 8% of one 2.1 GHz core for 64 players,
+**How many players it can carry.** In the Phase 3 load test the server used about 9% of one 2.1 GHz core for 64 players,
 almost all of it sending and receiving packets. A tenth of a CPU is about 10% of a core, so 64 players would sit
-at four fifths of the allowance with nothing left for a busy moment, and a service that hits its allowance is
+at nine tenths of the allowance with nothing left for a busy moment, and a service that hits its allowance is
 paused until the next slice of time, which players feel as a freeze. Around 30 players leaves a comfortable
 margin today. That number will fall as later phases add things the server must simulate. Treat the free instance
 as a place for small test sessions, not as the home of a full world. It has not been deployed yet.
@@ -81,5 +82,6 @@ Caddy (which fetches certificates by itself) is the usual free pairing. This rou
 | `BOTS` | 63 | Bots to keep in the world. They step aside as people join. |
 | `MAX_PLAYERS` | 64 | People and bots together. |
 | `ORIGINS` | any | Comma-separated list of page origins allowed to connect, for example `https://malachi-nelson.github.io`. |
+| `HOUR` | 8 | The hour of the day the world starts at. A day lasts 48 minutes. |
 
 `/health` answers `ok`. `/status` returns the world's vital signs as JSON: players, tick timings, bytes a second.

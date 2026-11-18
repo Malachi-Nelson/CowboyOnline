@@ -24,7 +24,7 @@ import { Session } from '../../client/src/net/session.js';
 import { WsTransport, LagTransport } from '../../client/src/net/transport.js';
 import { rng32, yawOf, TAU } from '../../shared/math.js';
 import { BTN } from '../../shared/sim/moveFoot.js';
-import { HUB_X, HUB_Z, TICK_MS, WORLD_SIZE, BAND_NEAR, BAND_MID } from '../../shared/constants.js';
+import { HUB_X, HUB_Z, TICK_MS, WORLD_SIZE, BAND_NEAR, BAND_MID, KIND_HORSE } from '../../shared/constants.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const args = process.argv.slice(2), flag = n => args.includes('--' + n), opt = (n, d) => { const i = args.indexOf('--' + n); return i >= 0 ? args[i + 1] : d; };
@@ -33,56 +33,83 @@ const SECONDS = +opt('seconds', QUICK ? 20 : 60), SOAK = +opt('soak', 0), URL_ =
 const BOTS = +opt('bots', 0), MAXP = +opt('max-players', Math.max(64, N + BOTS)), FPS = +opt('fps', 60), NAME = opt('name', '');
 const OUT = resolve(ROOT, opt('out', 'tools/loadtest/out'));
 const SCENARIOS = {
-  street: { spawn: 'hub', r: 30, text: 'everyone within 30 m of one spot: the worst case for bandwidth' },
-  town: { spawn: 'hub', r: 200, text: 'everyone within 200 m of the hub: a busy town' },
-  spread: { spawn: 'spread', r: 150, text: 'everyone scattered over the whole map: the usual case' },
+  street: { spawn: 'hub', roam: 30, text: 'everyone and their horses within 30 m of one spot on the main street: the worst case for bandwidth' },
+  town: { spawn: 'hub', roam: 200, text: "everyone in and around Calder's Landing: a busy town" },
+  spread: { spawn: 'spread', roam: 0, text: 'everyone scattered over the whole map: the usual case' },
 };
 const wanted = SOAK ? [opt('scenario', 'town')] : opt('scenario', 'all') === 'all' ? Object.keys(SCENARIOS) : [opt('scenario')];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const pct = (sorted, p) => (sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))] : 0);
 const r1 = v => Math.round(v * 10) / 10, r3 = v => Math.round(v * 1000) / 1000;
 
-// someone who keeps moving: picks a spot near home, heads there at a walk, jog or sprint, sometimes strafing or
-// jumping, pauses now and then, picks another
-function brain(rand, radius) {
-  let tx = 0, tz = 0, has = false, wait = rand() * 1.5, pace = 0, strafe = 0, left = 0;
+// Someone who keeps moving. They pick a spot, head there at a walk, jog or sprint, sometimes strafing or jumping,
+// pause now and then, pick another. Two in three are riders: they whistle for their horse, get on when it arrives,
+// ride at a trot, a canter or a gallop, and now and then step down and walk for a while.
+function brain(rand, pick, rider) {
+  let tx = 0, tz = 0, has = false, wait = rand() * 1.5, pace = 0, strafe = 0, left = 0, lx = 0, lz = 0, slow = 0, n = 0;
+  let afoot = rider ? 0 : 1e9, call = 0, press = 0;              // afoot: steps left before wanting the horse again
   return (c, s) => {
-    const m = s.me, home = s.home; c.mx = 0; c.mz = 0; c.buttons = 0;
+    const a = s.a, m = a.f, h = a.h; c.mx = 0; c.mz = 0; c.buttons = 0;
+    if (press) { press = 0; return; }                            // let go of the key, so the next press counts
+    if (h && !a.riding && --afoot <= 0) {                        // wants to ride: call the horse, get on when it is here
+      const dx = h.x - m.x, dz = h.z - m.z;
+      if (dx * dx + dz * dz < 6.2 && Math.abs(h.sp) < 3.4) { c.buttons = BTN.USE; press = 1; has = false; return; }
+      if (--call <= 0) { c.buttons = BTN.WHISTLE; press = 1; call = 60 * 6; return; }
+    }
+    if (a.riding && rand() < 1 / (60 * 45)) { c.buttons = BTN.USE; press = 1; afoot = 60 * (6 + rand() * 12); has = false; return; }
     if (wait > 0) { wait -= 1 / 60; return; }
+    if (++n % 60 === 0) { slow = Math.hypot(m.x - lx, m.z - lz) < 0.5 ? slow + 1 : 0; lx = m.x; lz = m.z; }
     const dx = tx - m.x, dz = tz - m.z;
-    if (!has || dx * dx + dz * dz < 4 || --left < 0) {
-      const a = rand() * TAU, d = Math.sqrt(rand()) * radius;
-      tx = Math.min(WORLD_SIZE - 40, Math.max(40, home.x + Math.cos(a) * d)); tz = Math.min(WORLD_SIZE - 40, Math.max(40, home.z + Math.sin(a) * d));
-      has = true; left = 60 * (8 + rand() * 20);
+    if (!has || dx * dx + dz * dz < (a.riding ? 16 : 4) || --left < 0 || slow >= 2) {
+      const p = pick(rand, s); tx = p[0]; tz = p[1]; has = true; slow = 0; left = 60 * (8 + rand() * 20);
       if (rand() < 0.25) wait = 0.3 + rand() * 1.7;
-      const k = rand(); pace = k < 0.15 ? BTN.WALK : k < 0.55 ? 0 : BTN.SPRINT; strafe = rand() < 0.2 ? (rand() < 0.5 ? -60 : 60) : 0;
+      const k = rand(); pace = k < 0.15 ? BTN.WALK : k < 0.55 ? 0 : BTN.SPRINT; strafe = !a.riding && rand() < 0.2 ? (rand() < 0.5 ? -60 : 60) : 0;
       return;
     }
     c.yaw = Math.round((((yawOf(dx, dz) % TAU) + TAU) % TAU) / TAU * 65536) & 65535;
-    c.mz = 127; c.mx = strafe; c.buttons = pace | (rand() < 0.004 ? BTN.JUMP : 0);
+    c.mz = 127; c.mx = a.riding ? 0 : strafe; c.buttons = pace | (!a.riding && rand() < 0.004 ? BTN.JUMP : 0);
   };
 }
+const clampW = v => Math.min(WORLD_SIZE - 40, Math.max(40, v));
+const PICK = {
+  // up and down thirty metres of the main street
+  street: rand => [HUB_X + (rand() - 0.5) * 60, HUB_Z + (rand() - 0.5) * 12],
+  // the streets of Calder's Landing, the bridge and the far bank, and now and then somewhere out of town
+  town: (rand, s) => {
+    const k = rand();
+    if (k < 0.5) return [1894 + rand() * 206, HUB_Z + (rand() - 0.5) * 12];
+    if (k < 0.65) return [1985 + (rand() - 0.5) * 9, 1970 + rand() * 160];
+    if (k < 0.8) return [2110 + rand() * 120, HUB_Z + (rand() - 0.5) * 5];
+    for (let i = 0; i < 8; i++) { const a = rand() * TAU, d = Math.sqrt(rand()) * 200, x = HUB_X + Math.cos(a) * d, z = HUB_Z + Math.sin(a) * d, T = s.field.terrain; if (T.levelAt(x, z) < T.heightAt(x, z)) return [x, z]; }
+    return [HUB_X, HUB_Z];
+  },
+  // anywhere dry within 150 m of where they started
+  spread: (rand, s) => {
+    for (let i = 0; i < 8; i++) { const a = rand() * TAU, d = Math.sqrt(rand()) * 150, x = clampW(s.home.x + Math.cos(a) * d), z = clampW(s.home.z + Math.sin(a) * d), T = s.field.terrain; if (T.levelAt(x, z) < T.heightAt(x, z)) return [x, z]; }
+    return [s.home.x, s.home.z];
+  },
+};
 
-async function startServer(spawnMode) {
+async function startServer(spawnMode, roam) {
   if (URL_) return { url: URL_, http: URL_.replace(/^ws/, 'http'), stop() {} };
-  const child = spawn(process.execPath, [...(flag('gc-at-end') ? ['--expose-gc'] : []), resolve(ROOT, 'server/src/node/main.js')], { env: { ...process.env, PORT: String(PORT), BOTS: String(BOTS), MAX_PLAYERS: String(MAXP), SPAWN: spawnMode, ALLOW_RESET: '1' }, stdio: ['ignore', 'ignore', 'inherit'] });
+  const child = spawn(process.execPath, [...(flag('gc-at-end') ? ['--expose-gc'] : []), resolve(ROOT, 'server/src/node/main.js')], { env: { ...process.env, PORT: String(PORT), BOTS: String(BOTS), MAX_PLAYERS: String(MAXP), SPAWN: spawnMode, ROAM: String(roam), ALLOW_RESET: '1' }, stdio: ['ignore', 'ignore', 'inherit'] });
   const http = `http://127.0.0.1:${PORT}`;
   for (let i = 0; i < 100; i++) { try { if ((await fetch(http + '/health')).ok) break; } catch (e) { /* not up yet */ } await sleep(50); }
   return { url: `ws://127.0.0.1:${PORT}`, http, stop: () => new Promise(r => { child.once('exit', r); child.kill('SIGTERM'); }) };
 }
 
 async function scenario(name, seconds, soak) {
-  const sc = SCENARIOS[name], server = await startServer(sc.spawn), rand = rng32(1899 + name.length);
+  const sc = SCENARIOS[name], server = await startServer(sc.spawn, sc.roam), rand = rng32(1899 + name.length);
   const status = async () => (await fetch(server.http + '/status')).json();
   console.log(`\n== ${name}: ${sc.text}\n   ${N} players${BOTS ? ' and ' + BOTS + ' bots' : ''}, ${PING} ms ping (${PING / 2} ms each way, plus up to ${JITTER} ms of jitter), ${seconds} s`);
 
   // ---- connect everyone over two seconds
   const sessions = [], byId = new Map(), TRUTH = 4096;
   for (let i = 0; i < N; i++) {
-    const s = new Session(new LagTransport(new WsTransport(server.url), PING / 2, JITTER, rng32(77 + i)), { name: 'load-' + (i + 1), sample: brain(rng32(1000 + i), sc.r) });
-    s.truth = new Float32Array(TRUTH * 3); s.truthTick = new Int32Array(TRUTH).fill(-1);
-    s.onself = (tick, ack, x, y, z) => { const k = tick % TRUTH; s.truthTick[k] = tick; s.truth[k * 3] = x; s.truth[k * 3 + 1] = y; s.truth[k * 3 + 2] = z; };
-    s.onwelcome = o => { s.home = sc.spawn === 'spread' ? { x: o.x, z: o.z } : { x: HUB_X, z: HUB_Z }; byId.set(o.id, s); };
+    const s = new Session(new LagTransport(new WsTransport(server.url), PING / 2, JITTER, rng32(77 + i)), { name: 'load-' + (i + 1), sample: brain(rng32(1000 + i), PICK[name], i % 3 !== 0) });
+    s.truth = new Float32Array(TRUTH * 3); s.truthH = new Float32Array(TRUTH * 2); s.truthTick = new Int32Array(TRUTH).fill(-1);
+    s.onself = (tick, ack, x, y, z) => { const k = tick % TRUTH, h = s.srv.h; s.truthTick[k] = tick; s.truth[k * 3] = x; s.truth[k * 3 + 1] = y; s.truth[k * 3 + 2] = z; if (h) { s.truthH[k * 2] = h.x; s.truthH[k * 2 + 1] = h.z; } };
+    s.onwelcome = o => { s.home = sc.spawn === 'spread' ? { x: o.x, z: o.z } : { x: HUB_X, z: HUB_Z }; byId.set(o.id, [s, false]); if (o.horseId) byId.set(o.horseId, [s, true]); };
     s.peakIn = 0; s.peakOut = 0; s.lastIn = 0; s.lastOut = 0;
     sessions.push(s);
     setTimeout(() => s.open(), i * (2000 / N));
@@ -99,9 +126,10 @@ async function scenario(name, seconds, soak) {
   const t0 = performance.now(), series = [], viewErr = { near: [], mid: [], far: [] }, pending = [], viewN = [];
   const first = await status(), tFirst = performance.now();
   const sample = (id, t) => {                                    // where the server really had entity `id` at server time t
-    const s = byId.get(id); if (!s) return null;
-    const tk = t / TICK_MS, a = Math.floor(tk), f = tk - a, i = a % TRUTH, j = (a + 1) % TRUTH;
+    const rec = byId.get(id); if (!rec) return null;
+    const s = rec[0], tk = t / TICK_MS, a = Math.floor(tk), f = tk - a, i = a % TRUTH, j = (a + 1) % TRUTH;
     if (s.truthTick[i] !== a || s.truthTick[j] !== a + 1) return null;
+    if (rec[1]) { const q = s.truthH; if (Math.hypot(q[j * 2] - q[i * 2], q[j * 2 + 1] - q[i * 2 + 1]) > 5) return null; return [q[i * 2] + (q[j * 2] - q[i * 2]) * f, q[i * 2 + 1] + (q[j * 2 + 1] - q[i * 2 + 1]) * f]; }   // a horse brought in by a whistle has no "between"
     const p = s.truth; return [p[i * 3] + (p[j * 3] - p[i * 3]) * f, p[i * 3 + 2] + (p[j * 3 + 2] - p[i * 3 + 2]) * f];
   };
   let lastSecond = t0;
@@ -113,7 +141,7 @@ async function scenario(name, seconds, soak) {
       // note how three of the players this one can see are drawn right now; checked against the truth a little later
       s.frame(now);
       const list = [...s.ents.values()];
-      for (let k = 0; k < 3 && list.length; k++) { const e = list[(rand() * list.length) | 0]; pending.push([e.id, now + s.tOff - e.delay, e.x, e.z, Math.hypot(e.x - s.x, e.z - s.z), now]); }
+      for (let k = 0; k < 3 && list.length; k++) { const e = list[(rand() * list.length) | 0]; if ((e.st & 8) && !e.mount) continue; pending.push([e.id, now + s.tOff - e.delay, e.x, e.z, Math.hypot(e.x - s.x, e.z - s.z), now]); }
     }
     while (pending.length && now - pending[0][5] > 1500) {
       const [id, t, x, z, d] = pending.shift(), tr = sample(id, t);

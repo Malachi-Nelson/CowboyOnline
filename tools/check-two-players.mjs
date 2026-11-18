@@ -23,22 +23,22 @@ async function join(name) {
   await page.route('**/three.min.js', r => r.fulfill({ path: resolve(ROOT, 'node_modules/three/build/three.min.js'), contentType: 'application/javascript' }));
   await page.route('**fonts.googleapis.com/**', r => r.fulfill({ contentType: 'text/css', body: '' }));
   await page.goto(pathToFileURL(resolve(ROOT, 'client/dist/index.html')).href + '?server=' + encodeURIComponent(`ws://127.0.0.1:${PORT}`));
-  await page.waitForFunction(() => globalThis.__ct && __ct.session && __ct.session.state === 'playing' && __ct.camera, null, { timeout: 20000 });
-  await page.evaluate(() => { for (const m of __ct.view.scene.children) if (m.isMesh && !m.isInstancedMesh) m.visible = false; });   // scenery off: software drawing is slow
+  await page.waitForFunction(() => globalThis.__ct && __ct.session && __ct.session.state === 'playing' && __ct.camera && __ct.world, null, { timeout: 60000 });
+  await page.evaluate(() => { __ct.view.scene.visible = false; });   // scenery off: software drawing is slow
   return page;
 }
 const ada = await join('Ada'), boone = await join('Boone');
 await ada.waitForTimeout(1500);
-const seen = () => boone.evaluate(() => { const e = [...__ct.session.ents.values()].find(e => !(e.ef & 1)); return e ? { name: e.name, x: e.x, z: e.z, d: Math.hypot(e.x - __ct.session.x, e.z - __ct.session.z) } : null; });
+const seen = () => boone.evaluate(() => { const e = [...__ct.session.ents.values()].find(e => !(e.ef & 1) && e.kind === 1); return e ? { name: e.name, x: e.x, z: e.z, d: Math.hypot(e.x - __ct.session.x, e.z - __ct.session.z) } : null; });
 const before = await seen();
 // Boone turns to face Ada so the picture has her in it; Ada jogs in a rough circle
-await boone.evaluate(() => { const s = __ct.session, e = [...s.ents.values()].find(e => !(e.ef & 1)); if (e) __ct.controls.intent.yaw = Math.atan2(-(e.x - s.x), -(e.z - s.z)); });
+await boone.evaluate(() => { const s = __ct.session, e = [...s.ents.values()].find(e => !(e.ef & 1) && e.kind === 1); if (e) __ct.controls.intent.yaw = Math.atan2(-(e.x - s.x), -(e.z - s.z)); });
 await ada.keyboard.down('KeyW'); await ada.waitForTimeout(1200); await ada.keyboard.down('KeyD'); await ada.waitForTimeout(1500); await ada.keyboard.up('KeyD'); await ada.waitForTimeout(800);
 const after = await seen();
-const stats = async p => p.evaluate(() => { const s = __ct.session, st = s.stats; return { id: s.id, others: s.ents.size, people: [...s.ents.values()].filter(e => !(e.ef & 1)).map(e => e.name), corrections: st.corrections, errMaxMm: st.errMax * 1000, ping: Math.round(s.rtt), tags: document.querySelectorAll('#tags span:not([hidden])').length }; });
+const stats = async p => p.evaluate(() => { const s = __ct.session, st = s.stats; return { id: s.id, others: s.ents.size, people: [...s.ents.values()].filter(e => !(e.ef & 1) && e.kind === 1).map(e => e.name), horses: [...s.ents.values()].filter(e => e.kind === 2).length, corrections: st.corrections, errMaxMm: st.errMax * 1000, ping: Math.round(s.rtt), tags: document.querySelectorAll('#tags span:not([hidden])').length }; });
 const A = await stats(ada), B = await stats(boone);
-for (const p of [ada, boone]) await p.evaluate(() => { for (const m of __ct.view.scene.children) m.visible = true; });
-await boone.evaluate(() => { const s = __ct.session, e = [...s.ents.values()].find(e => !(e.ef & 1)); if (e) __ct.controls.intent.yaw = Math.atan2(-(e.x - s.x), -(e.z - s.z)); });
+for (const p of [ada, boone]) await p.evaluate(() => { __ct.view.scene.visible = true; });
+await boone.evaluate(() => { const s = __ct.session, e = [...s.ents.values()].find(e => !(e.ef & 1) && e.kind === 1); if (e) __ct.controls.intent.yaw = Math.atan2(-(e.x - s.x), -(e.z - s.z)); });
 await ada.keyboard.up('KeyW'); await boone.waitForTimeout(4000);
 await boone.screenshot({ path: resolve(OUT, 'two-players-boone-sees-ada.png') }); await ada.screenshot({ path: resolve(OUT, 'two-players-ada.png') });
 const status = await (await fetch(`http://127.0.0.1:${PORT}/status`)).json();

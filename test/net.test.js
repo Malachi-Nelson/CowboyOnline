@@ -2,22 +2,42 @@
 // simulated-lag wrapper.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Writer } from '../shared/net/codec.js';
-import { encInputHead, encCmd, encPing, encPong, writeSnapshotHead, writeSpawn, spawnSize, SNAPSHOT_HEAD } from '../shared/net/messages.js';
-import { BAND_NEAR, BAND_MID, BAND_FAR, TICK_MS, SNAPSHOT_BUDGET, TICK_RATE } from '../shared/constants.js';
-import { makeFoot } from '../shared/sim/moveFoot.js';
+import { Writer, Reader } from '../shared/net/codec.js';
+import { encInputHead, encCmd, encPing, encPong, encWelcome, decWelcome, writeSnapshotHead, writeSelf, readSelf, writeSpawn, spawnSize, SNAPSHOT_HEAD, SELF_SIZE, HORSE_SIZE } from '../shared/net/messages.js';
+import { BAND_NEAR, BAND_MID, BAND_FAR, TICK_MS, SNAPSHOT_BUDGET, TICK_RATE, KIND_HORSE, KIND_PLAYER } from '../shared/constants.js';
+import { makeActor, stepActor, AF } from '../shared/sim/actor.js';
+import { BTN } from '../shared/sim/moveFoot.js';
+import { flatField } from '../shared/world/field.js';
 import { intervalFor, Remote } from '../client/src/net/interp.js';
 import { LagTransport } from '../client/src/net/transport.js';
 
 test('message sizes are what the protocol document says', () => {
-  const w = new Writer(256);
+  const w = new Writer(256), a = makeActor(1, 2, 3, true);
   encInputHead(w, 1, 3, 0); for (let i = 0; i < 3; i++) encCmd(w, 0, 127, 0, 1);
   assert.equal(w.o, 21, 'three inputs in a packet');
-  assert.equal(encPing(w, 1).length, 9); assert.equal(encPong(w, 1, 2).length, 17);
-  writeSnapshotHead(w, 1, 2, makeFoot(1, 2, 3), 1); assert.equal(w.o, SNAPSHOT_HEAD);
-  const e = { id: 7, kind: 1, ef: 0, name: 'Hattie', nameBytes: 6, qx: 1, qy: 2, qz: 3, qyaw: 4, st: 1 }, at = w.o;
-  writeSpawn(w, e); assert.equal(w.o - at, spawnSize(e));
+  assert.equal(encPing(w, 1).length, 9); assert.equal(encPong(w, 1, 2, 3).length, 21);
+  writeSnapshotHead(w, 1, 2, a, false); assert.equal(w.o, SNAPSHOT_HEAD); assert.equal(SNAPSHOT_HEAD, 33);
+  writeSnapshotHead(w, 1, 2, a, true); assert.equal(w.o, SNAPSHOT_HEAD + HORSE_SIZE); assert.equal(SELF_SIZE + HORSE_SIZE, 66);
+  const e = { id: 7, kind: KIND_PLAYER, ef: 0, name: 'Hattie', nameBytes: 6, qx: 1, qy: 2, qz: 3, qyaw: 4, st: 1 }; let at = w.o;
+  writeSpawn(w, e); assert.equal(w.o - at, spawnSize(e)); assert.equal(spawnSize(e), 21);
+  const h = { id: 8, kind: KIND_HORSE, ef: 0, name: '', nameBytes: 0, qx: 1, qy: 2, qz: 3, qyaw: 4, st: 1, owner: e }; at = w.o;
+  writeSpawn(w, h); assert.equal(w.o - at, spawnSize(h)); assert.equal(spawnSize(h), 17);
   assert.ok((SNAPSHOT_BUDGET + 4) * TICK_RATE <= 16000, 'a full snapshot every tick stays inside 16 KB/s');
+});
+
+test('a player and their horse survive the trip over the wire exactly', () => {
+  const f = flatField(), a = makeActor(2100, f.base, 2100, true), w = new Writer(256);
+  a.h.x += 30; const cmd = { mx: 30, mz: 127, yaw: 9000, buttons: BTN.WHISTLE };
+  for (let i = 0; i < 200; i++) { cmd.buttons = i === 0 ? BTN.WHISTLE : i === 150 ? BTN.USE : BTN.SPRINT; stepActor(a, cmd, f); }
+  w.reset(); writeSelf(w, a, true);
+  const b = makeActor(0, 0, 0, false), fl = readSelf(new Reader(w.bytes()), b);
+  assert.ok(fl & AF.HORSE_BLOCK); assert.deepEqual(b, a);
+  // without the horse block, the horse the reader already has is left alone
+  const keep = b.h.x; a.f.x += 1; w.reset(); writeSelf(w, a, false); readSelf(new Reader(w.bytes()), b);
+  assert.equal(b.f.x, a.f.x); assert.equal(b.h.x, keep);
+  // and the welcome carries all of it
+  const o = decWelcome(new Reader(encWelcome(w, { id: 5, tickRate: 20, tick: 99, serverNow: 1234.5, dayMs: 777, seed: 1899, token: 'abc', horseId: 6, actor: a }).subarray(1)), b);
+  assert.deepEqual([o.id, o.tick, o.serverNow, o.dayMs, o.seed, o.token, o.horseId], [5, 99, 1234.5, 777, 1899, 'abc', 6]); assert.deepEqual(b, a);
 });
 
 test('others are never drawn closer to the present than the server refreshes them', () => {
@@ -38,6 +58,7 @@ test('a late update carries a moving body forward a little, and leaves a standin
   const still = new Remote(2, 1, 0, 'b'); still.push(1000, 0, 0, 0, 0, true); still.push(1050, 0.3, 0, 0, 0, false);
   still.sample(1400); assert.equal(still.x, Math.fround(0.3));
   run.sample(1025); assert.ok(Math.abs(run.x - 0.15) < 1e-6, 'and between two samples it is in between');
+  run.reset(); run.push(2000, 50, 0, 0, 0, true); run.sample(1950); assert.equal(run.x, 50, 'after a reset it is simply where it was put');
 });
 
 test('simulated lag delays messages both ways and keeps them in order', async () => {

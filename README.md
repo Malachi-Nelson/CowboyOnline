@@ -4,24 +4,37 @@
 
 Cowboy Online is a Wild West open world for the browser, built on the bones of
 [HoodWar](https://github.com/Malachi-Nelson/HoodWar): the frontier in 1899, up to 64 players in one world on an
-authoritative server. Calder Territory is the world it is set in. This repository is at **Phase 2 of 11**: the
-networking foundation and a test range to try it on. There is no map, horse or gun yet.
+authoritative server. Calder Territory is the world it is set in. This repository is at **Phase 3 of 11**: the
+territory and your horse. There are no guns yet.
 
-![A figure in a hat and pale coat sprinting across open grassland, with a connection readout and a radar](docs/screenshots/sprinting-with-150ms-ping.jpg)
+![On the main street of Calder's Landing, with your horse beside you](docs/screenshots/main-street.jpg)
 
-The pictures in `docs/screenshots/` come from a headless browser that draws in software, which is why the readout
-in them shows a few frames a second.
+| | |
+|---|---|
+| ![Riding over the bridge out of town](docs/screenshots/riding-over-the-bridge.jpg) | ![Cold Lantern Camp in the high country](docs/screenshots/high-country.jpg) |
+| ![The main street at night](docs/screenshots/night.jpg) | ![The map](docs/screenshots/map.jpg) |
+
+The pictures in `docs/screenshots/` come from a headless browser that draws in software.
 
 ## What works today
 
-- An authoritative world server: 20 ticks a second, movement stepped at 60 Hz, one process per 64-player world.
-- A binary protocol over WebSockets, with interest management (you are only told about what is within 384 m),
-  priority-ordered snapshots under a fixed byte budget, and delta-encoded positions.
-- Client prediction that agrees with the server to the last bit, reconciliation when it does not, and smooth
-  drawing of everyone else a tenth of a second in the past.
-- The same server code running inside a browser tab, with bots, so playing alone needs no hosting at all.
-- On-foot movement tuned for weight: about 0.9 s to reach a sprint, 0.4 s and 1.3 m to stop, a 2 m turning arc.
-- A load test with 64 real clients at 150 ms ping. It passes every gate (numbers in `docs/ARCHITECTURE.md`).
+- **A territory to ride across.** Four kilometres square: Calder's Landing on the Calder river with a bridge, the
+  Sawback Range and its pine forest to the north-west, the snowy high country and Cold Lantern Camp in the far
+  north, the plains and Tolliver Ranch to the east, the Mirewood swamp to the south-east, and the Dry Fork desert,
+  its buttes and its canyon to the south-west. Roads join the five settlements, with telegraph poles along them.
+  Everything is made from one seed by plain arithmetic, so the browser and the server build the same world.
+- **Your horse.** It stands beside you when you arrive. **H** whistles: it comes at a run, and if it is too far off
+  to run all the way it is brought in behind you, out of sight, and runs the rest. **E** mounts and dismounts.
+  It walks, trots, canters and gallops, takes about four seconds to reach a gallop and two and a half to pull up,
+  turns wider the faster it goes, will not climb a cliff, swims rivers, and is winded after half a minute of
+  galloping.
+- **A lived-in world.** Townsfolk walk the streets; riders travel the roads, stop at the end of them, stretch their
+  legs, whistle their horses back and ride on. A day lasts 48 minutes, windows light up after dark, and the weather
+  comes and goes: rain on the plains, snow in the high country, mist in the Mirewood.
+- **The netcode from Phase 2, now carrying horses.** An authoritative server at 20 ticks a second, prediction that
+  agrees with the server to the last bit (your horse included), interest management and a fixed bandwidth budget.
+- **A small screen.** A round map that turns with you, the time, your horse's wind, what the keys do right now, the
+  name of a place as you ride into it, and a full map on **M**. The Phase 2 instruments are behind **F3**.
 
 ## Run it
 
@@ -31,32 +44,40 @@ Needs Node 22 or newer.
 npm install
 npm test                 # unit and end-to-end tests
 npm run build            # writes client/dist/index.html, one self-contained page
-npm start                # the world server on :8080 (PORT, BOTS, SPAWN, ORIGINS in the environment)
+npm start                # the world server on :8080 (PORT, BOTS, SPAWN, ORIGINS, HOUR in the environment)
 npm run loadtest         # 64 simulated players against a fresh server; add -- --quick for the 1-minute version
 ```
 
 Open `client/dist/index.html` in a browser to play in the tab's own world. To join a server instead, add
-`?server=ws://localhost:8080` to the address, or type the address into the title card.
+`?server=ws://localhost:8080` to the address, or type the address into the title card. `?hour=21` starts the
+tab's world at nine in the evening.
 
 ## How the page gets published
 
 Every push to `main` runs the tests, builds the page and puts `client/dist/index.html` on the `gh-pages` branch
 (`.github/workflows/ci.yml`). GitHub Pages serves that branch at the address above. Nothing built is kept on `main`.
 
-`node tools/check-client.mjs` drives the built page in a headless browser and saves screenshots to `tools/out/`.
-It needs Playwright, which is not in `package.json` (`npm i -D playwright && npx playwright install chromium`).
+`node tools/check-client.mjs` drives the built page in a headless browser: it walks away from the horse, whistles,
+mounts, gallops with 150 ms of added ping, dismounts, and fails on any page error or prediction error. `--tour`
+also takes pictures around the territory, at dusk, at night and in the rain. It needs Playwright, which is not in
+`package.json` (`npm i -D playwright && npx playwright install chromium`).
 
 ## Layout
 
 ```
-shared/            code both sides run: wire format, constants, terrain, collision, movement
+shared/            code both sides run
   net/             codec.js (bytes), messages.js (every message)
-  sim/             moveFoot.js (the movement step), trig.js (exact sine and cosine)
-  world/           terrain.js, collide.js, field.js (the Phase 2 test field)
-server/src/core/   the authoritative world; no Node in it, so it also runs in a browser tab
+  sim/             moveFoot.js, moveHorse.js, actor.js (a player, their horse, the whistle), trig.js
+  world/           terrain.js (ground, water, regions, roads), trees.js, towns.js, field.js, weather.js, collide.js
+server/src/core/   the authoritative world and the bots; no Node in it, so it also runs in a browser tab
 server/src/node/   the WebSocket gateway and the /health and /status pages
-client/src/        the game page: net/ input/ player/ render/ ui/ state/
-tools/             build-client.mjs, check-client.mjs, loadtest/run.mjs
+client/src/        the game page
+  net/             session (prediction, reconciliation, interpolation), transports, the in-tab world
+  render/          scene (sky, sun, day and night), terrain and water, trees, towns, weather, figures, build.js
+  input/ player/   controls, camera
+  ui/              hud.js (the corners), map.js, page.html, style.css
+  audio/           sound.js (footfalls, hoofbeats, the whistle, wind, water, rain, birds, crickets)
+tools/             build-client.mjs, check-client.mjs, check-two-players.mjs, loadtest/run.mjs
 test/              node:test suites
 docs/              ARCHITECTURE.md, PROTOCOL.md, HOSTING.md
 ```
@@ -77,7 +98,7 @@ Four ways to run a world without paying, from least to most effort. Details and 
 
 1. Audit of HoodWar and the architecture plan. Done.
 2. Server and networking foundation, load-tested with 64 clients. Done.
-3. World foundation: the map, streamed terrain, towns, day and night, weather.
+3. World foundation: the territory, towns, horses, day and night, weather. Done.
 4. Combat, the focus meter, law and wanted levels.
 5. Accounts, saving, economy.
 6. Bounty hunting. 7. Hunting, fishing, camp. 8. Trains and robberies. 9. The living-world pass.

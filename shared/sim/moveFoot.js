@@ -22,8 +22,11 @@ export const FOOT = {
   turnSlow: 12, turnFast: 3.5,           // rad/s the heading can swing, standing and at a sprint (6.5 / 3.5 = 1.86 m arc)
   gravity: 20, jump: 4.6, airAccel: 2,
   uphill: 0.9,                           // share of speed lost per metre climbed per metre run, capped at 60%
+  steep: 1.1,                            // ground rising faster than this (about 48 degrees) cannot be climbed
+  wade: 0.3, swimAt: 1.25, swim: 1.7,    // water over the shins slows a body; at chest height it floats and swims
 };
-export const BTN = { SPRINT: 1, JUMP: 2, WALK: 4 };
+export const BTN = { SPRINT: 1, JUMP: 2, WALK: 4, USE: 8, WHISTLE: 16 };
+export const BTN_MASK = 31;
 export const FLAG = { GROUND: 1, JUMP_HELD: 2 };
 
 export function makeFoot(x = 0, y = 0, z = 0) { return { x, y, z, vx: 0, vy: 0, vz: 0, ground: 1, jumpHeld: 0 }; }
@@ -31,17 +34,23 @@ export function copyFoot(d, s) { d.x = s.x; d.y = s.y; d.z = s.z; d.vx = s.vx; d
 export const footFlags = s => (s.ground ? FLAG.GROUND : 0) | (s.jumpHeld ? FLAG.JUMP_HELD : 0);
 
 // cmd: { mx, mz: -127..127 (strafe right, forward), yaw: 0..65535 (view direction), buttons }
-// field: { terrain.heightAt(x, z), boxes (BoxWorld), groundAt(x, z, feet) }
+// field: { terrain: heightAt, levelAt; boxes; trees; groundAt(x, z, feet) }
 export function stepFoot(s, cmd, field) {
-  const F = FOOT, dt = SIM_DT, btn = cmd.buttons;
+  const F = FOOT, dt = SIM_DT, btn = cmd.buttons, T = field.terrain;
   const fwd = cmd.mz / 127, str = cmd.mx / 127, ml = Math.sqrt(fwd * fwd + str * str);
+  const wet = T.levelAt(s.x, s.z) - s.y, swim = wet >= F.swimAt - 0.05;       // how far under the surface the feet are
   let wx = 0, wz = 0, wish = 0;
   if (ml > 0.05) {
     const sn = SIN16[cmd.yaw & 65535], cs = COS16[cmd.yaw & 65535], k = 1 / ml;
     wx = (-sn * fwd + cs * str) * k; wz = (-cs * fwd - sn * str) * k;
     wish = ((btn & BTN.SPRINT) && fwd > 0.5 ? F.sprint : (btn & BTN.WALK) ? F.walk : F.jog) * (ml < 1 ? ml : 1);
+    if (swim) { if (wish > F.swim) wish = F.swim; }
+    else if (wet > F.wade) wish *= 1 - 0.5 * (wet > 1 ? 1 : (wet - F.wade) / (1 - F.wade));
   }
   let sp = Math.sqrt(s.vx * s.vx + s.vz * s.vz);
+  // the slope underfoot, in metres of rise per metre; none when standing on something built, or afloat
+  let gx = 0, gz = 0;
+  if (s.ground && !swim && s.y - T.heightAt(s.x, s.z) < 0.06) { gx = T.heightAt(s.x + 0.5, s.z) - T.heightAt(s.x - 0.5, s.z); gz = T.heightAt(s.x, s.z + 0.5) - T.heightAt(s.x, s.z - 0.5); }
 
   if (s.ground) {
     if (wish > 0) {
@@ -50,7 +59,7 @@ export function stepFoot(s, cmd, field) {
       const dot = hx * wx + hz * wz;
       if (dot < -0.5 && sp > 1.5) sp -= F.brake * dt;          // asked to reverse: brake first
       else {
-        const grade = field.terrain.heightAt(s.x + hx, s.z + hz) - field.terrain.heightAt(s.x, s.z);
+        const grade = hx * gx + hz * gz;
         if (grade > 0) wish *= 1 - (grade * F.uphill > 0.6 ? 0.6 : grade * F.uphill);
         // swing the heading toward where it is told to go, by no more than the turn rate allows
         const lim = (F.turnSlow + (F.turnFast - F.turnSlow) * (sp >= F.sprint ? 1 : sp / F.sprint)) * dt, ca = cosSmall(lim);
@@ -64,8 +73,11 @@ export function stepFoot(s, cmd, field) {
       const ns = sp - F.decel * dt;
       if (ns <= 0) { s.vx = 0; s.vz = 0; } else { s.vx *= ns / sp; s.vz *= ns / sp; }
     }
+    // too steep to climb: movement up the slope is taken away; along it and down it is left
+    const g2 = gx * gx + gz * gz;
+    if (g2 > F.steep * F.steep) { const up = s.vx * gx + s.vz * gz; if (up > 0) { s.vx -= gx * up / g2; s.vz -= gz * up / g2; } }
     const j = btn & BTN.JUMP;
-    if (j && !s.jumpHeld) { s.vy = F.jump; s.ground = 0; }
+    if (j && !s.jumpHeld && !swim) { s.vy = F.jump; s.ground = 0; }
     s.jumpHeld = j ? 1 : 0;
   } else {
     if (wish > 0) {                                            // a little steering in the air, never more speed
@@ -78,18 +90,28 @@ export function stepFoot(s, cmd, field) {
 
   // across the ground, sliding along anything solid
   let nx = s.x + s.vx * dt, nz = s.z + s.vz * dt;
-  const bx = field.boxes;
+  const bx = field.boxes, tr = field.trees;
   if (bx.pushOut(nx, nz, F.r, s.y + F.step + 0.001, s.y + F.h - 0.05)) {
     nx = bx.x; nz = bx.z;
     const vn = s.vx * bx.nx + s.vz * bx.nz;
     if (vn < 0) { s.vx -= bx.nx * vn; s.vz -= bx.nz * vn; }
   }
+  if (tr.pushOut(nx, nz, F.r)) {
+    nx = tr.x; nz = tr.z;
+    const vn = s.vx * tr.nx + s.vz * tr.nz;
+    if (vn < 0) { s.vx -= tr.nx * vn; s.vz -= tr.nz * vn; }
+  }
   const lim = WORLD_SIZE - 4;
-  s.x = nx < 4 ? 4 : nx > lim ? lim : nx;
-  s.z = nz < 4 ? 4 : nz > lim ? lim : nz;
+  nx = nx < 4 ? 4 : nx > lim ? lim : nx; nz = nz < 4 ? 4 : nz > lim ? lim : nz;
 
-  // up and down
-  const g = field.groundAt(s.x, s.z, s.y);
+  // up and down. Deep water holds a body up by the chest.
+  let g = field.groundAt(nx, nz, s.y), fl = T.levelAt(nx, nz) - F.swimAt;
+  if (fl > g) g = fl;
+  if (!s.ground && g - s.y > F.step) {                         // a jump does not carry a body up a cliff
+    nx = s.x; nz = s.z; s.vx = 0; s.vz = 0;
+    g = field.groundAt(nx, nz, s.y); fl = T.levelAt(nx, nz) - F.swimAt; if (fl > g) g = fl;
+  }
+  s.x = nx; s.z = nz;
   if (s.ground) {
     if (s.y - g <= F.step + 0.35) { s.y = g; s.vy = 0; }       // up a step, or down a slope
     else s.ground = 0;                                          // off an edge
