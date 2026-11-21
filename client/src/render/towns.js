@@ -183,6 +183,14 @@ export function createTowns(scene, field) {
       for (let k = 0; k < 14; k++) { b.push(new THREE.Matrix4().makeTranslation(cx, y + 8.7, cz - 0.5).multiply(new THREE.Matrix4().makeRotationZ(k / 14 * Math.PI * 2))); b.box(-0.18, 0.25, 0, 0.18, 1.9, 0.03, C(0xb8b2a6), ''); b.pop(); }
       b.cube(cx, y + 8.7, cz + 1.1, 0.04, 0.9, 1.4, C(0xb8b2a6));
       b.cube(cx, y + 0.5, cz - 2.6, 2.6, 1.0, 1.3, WOOD);                       // a tank below it
+    } else if (p.kind === 'cell') {
+      // iron bars on all four sides, rails top and bottom, a plank roof and a stone floor
+      b.box(p.x0 - 0.2, y - 0.1, p.z0 - 0.2, p.x1 + 0.2, y + 0.06, p.z1 + 0.2, C(0x6e6a62));
+      for (const [ax, a0, a1, at] of [[true, p.x0, p.x1, p.z0 + 0.05], [true, p.x0, p.x1, p.z1 - 0.05], [false, p.z0, p.z1, p.x0 + 0.05], [false, p.z0, p.z1, p.x1 - 0.05]]) {
+        for (let a = a0 + 0.12; a < a1 - 0.06; a += 0.22) b.cube(ax ? a : at, y + p.h / 2, ax ? at : a, 0.05, p.h, 0.05, IRON);
+        for (const ry of [0.12, 1.3, p.h - 0.1]) b.cube(ax ? (a0 + a1) / 2 : at, y + ry, ax ? at : (a0 + a1) / 2, ax ? a1 - a0 : 0.08, 0.08, ax ? 0.08 : a1 - a0, IRON);
+      }
+      b.box(p.x0 - 0.25, y + p.h, p.z0 - 0.25, p.x1 + 0.25, y + p.h + 0.18, p.z1 + 0.25, [PLANK, DARKWOOD, DARKWOOD]);
     } else if (p.kind === 'wagonx' || p.kind === 'wagonz') {
       b.push(new THREE.Matrix4().makeTranslation(cx, y, cz).multiply(new THREE.Matrix4().makeRotationY(p.kind === 'wagonx' ? Math.PI / 2 : 0)));
       b.box(-0.75, 0.7, -1.7, 0.75, 0.82, 1.7, PLANK); for (const s of [-1, 1]) b.box(s * 0.75 - 0.05, 0.82, -1.7, s * 0.75 + 0.05, 1.35, 1.7, WOOD, 'b');

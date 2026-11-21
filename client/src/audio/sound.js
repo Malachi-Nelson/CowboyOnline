@@ -41,7 +41,7 @@ export function createSound() {
   let birdAt = 0, cricketAt = 0;
   return {
     start,
-    frame() { budget = 8; },                                     // at most this many new sounds a frame
+    frame() { budget = 14; },                                    // at most this many new sounds a frame
     // a foot coming down at `speed` m/s, `dist` metres from the listener
     step(speed, dist) { burst((0.07 + Math.min(0.2, speed * 0.03)) * near(dist), 'lowpass', 420 + speed * 110 + Math.random() * 160, 0.7, 0.07 + Math.random() * 0.03); },
     land(dist) { burst(0.42 * near(dist), 'lowpass', 300, 0.7, 0.17); },
@@ -62,6 +62,42 @@ export function createSound() {
       else if (surface === 3) burst(k * 0.5, 'lowpass', 600, 0.5, 0.2);
       else burst(k * 0.3, 'bandpass', 800 + Math.random() * 300, 1.2, 0.09, 0.02);
     },
+    // A gunshot: the crack, the boom behind it, and the roll of it coming back off the hills or the buildings.
+    // Further off it is quieter, duller, and its echo is a bigger share of it. gun 1 revolver, 2 repeater
+    shot(gun, dist, town) {
+      if (!ready()) return;
+      const near = 1 / (1 + dist * dist / 900), far = Math.min(1, dist / 250), big = gun === 2 ? 1.25 : 1;
+      burst(0.9 * near * big, 'bandpass', 2600 - far * 1700 + Math.random() * 300, 0.9, 0.05);
+      burst(0.8 * near * big + 0.05, 'lowpass', 520 - far * 260, 0.8, 0.22);
+      burst(0.5 * near * big, 'lowpass', 140, 1.1, 0.3);
+      const tail = (0.12 + 0.2 * far) * (0.6 + near) * (town ? 1.3 : 1);
+      burst(tail, 'lowpass', 380 - far * 150, 0.5, 1.3, 0.12 + Math.min(0.5, dist / 400));
+      if (town) burst(tail * 0.6, 'bandpass', 900, 0.6, 0.5, 0.06);
+    },
+    // the hammer falling on nothing; a round going in; the lever or hammer worked
+    click(dist = 0) { burst(0.25 / (1 + dist * dist / 30), 'bandpass', 3400, 4, 0.03); },
+    load(dist = 0) { const k = 1 / (1 + dist * dist / 30); burst(0.14 * k, 'bandpass', 2400 + Math.random() * 600, 3, 0.04); burst(0.08 * k, 'bandpass', 1500, 2, 0.05, 0.05); },
+    cock(gun, dist = 0) { const k = 1 / (1 + dist * dist / 30); if (gun === 2) { burst(0.2 * k, 'bandpass', 1700, 3, 0.05); burst(0.24 * k, 'bandpass', 2300, 3, 0.05, 0.12); } else burst(0.16 * k, 'bandpass', 2900, 5, 0.035); },
+    // where a shot landed: dirt, wood, water, a tree, or someone
+    impact(struck, dist) {
+      const k = 1 / (1 + dist * dist / 120); if (k < 0.01) return;
+      if (struck === 2) { burst(0.4 * k, 'bandpass', 900, 1.4, 0.09); burst(0.2 * k, 'bandpass', 2200, 2, 0.05); }
+      else if (struck === 4) burst(0.35 * k, 'bandpass', 1500, 0.7, 0.25);
+      else if (struck === 3) burst(0.35 * k, 'bandpass', 700, 1.2, 0.1);
+      else if (struck === 5 || struck === 6) burst(0.45 * k, 'lowpass', 260, 1, 0.12);
+      else { burst(0.3 * k, 'lowpass', 600, 0.8, 0.12); if (Math.random() < 0.18) tone(0.04 * k, 2600 + Math.random() * 1500, 900, 0.35); }   // now and then a ricochet
+    },
+    // a bullet going past close by
+    whiz(miss) { const k = Math.max(0, 1 - miss / 4); if (k < 0.05) return; burst(0.35 * k, 'bandpass', 3200 + Math.random() * 1600, 2.5, 0.12); },
+    // being hit
+    hurt(heavy) { burst(heavy ? 0.7 : 0.45, 'lowpass', 160, 1, 0.25); tone(0.05, 3800, 3600, 0.5, 0.02); },
+    // Iron Nerve: a slow heartbeat under everything else, and the world's sounds pushed back
+    focus(on) {
+      if (!ready()) return;
+      const t = ctx.currentTime;
+      amb.gain.setTargetAtTime(on ? 0.12 : 0.5, t, 0.15); out.gain.setTargetAtTime(on ? 0.45 : 0.6, t, 0.15);
+    },
+    heartbeat() { burst(0.5, 'lowpass', 70, 1.2, 0.16); burst(0.35, 'lowpass', 60, 1.2, 0.14, 0.2); },
     // two rising notes and a fall: a whistle for a horse. Others' whistles come from further off.
     whistle(dist = 0) {
       const g = 0.16 / (1 + dist * dist / 900);

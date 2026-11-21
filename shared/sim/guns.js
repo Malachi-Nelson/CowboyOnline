@@ -31,7 +31,7 @@ export const DRAW_STEPS = 24, HOLSTER_STEPS = 18;               // 0.4 s to draw
 export const AIM_STEADY = 18;                                    // steps of aiming before the aimed spread is reached
 export const FOCUS = { drain: 1 / 7, refill: 1 / 45, min: 0.08 }; // a full meter is 7 s of focus and refills in 45 s
 // The shot's line. Head height and shoulder offset match the camera (client/src/player/camera.js reads these).
-export const AIM = { head: 1.55, rideHead: 2.45, shoulder: 0.55, rideShoulder: 0.6, up: 0.15 };
+export const AIM = { head: 1.55, rideHead: 2.45, shoulder: 0.72, rideShoulder: 0.8, up: 0.15 };
 export const GF = { FIRE_HELD: 1, RELOAD_HELD: 2, IN_FOCUS: 4, HANDS: 8 };
 export const WEAPON_SHIFT = 10;
 export const weaponOf = buttons => (buttons >> WEAPON_SHIFT) & 3;

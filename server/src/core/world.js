@@ -6,7 +6,7 @@
 // and close().
 import {
   PROTOCOL_VERSION, TICK_RATE, TICK_MS, CMDS_PER_TICK, WORLD_SIZE, WORLD_SEED, HUB_X, HUB_Z, MAX_PLAYERS, DAY_MS, DAY_START_HOUR,
-  VIEW_ENTER, VIEW_LEAVE, BAND_NEAR, BAND_MID, BAND_FAR, SNAPSHOT_BUDGET, KIND_PLAYER, KIND_HORSE, EF_BOT, ST_GROUND, ST_SPRINT, ST_MOVE, ST_RIDING, ST_WHISTLE,
+  VIEW_ENTER, VIEW_LEAVE, BAND_NEAR, BAND_MID, BAND_FAR, SNAPSHOT_BUDGET, KIND_PLAYER, KIND_HORSE, EF_BOT, EF_LAW, ST_GROUND, ST_SPRINT, ST_MOVE, ST_RIDING, ST_WHISTLE,
   HP_MAX, GR_AIM, GR_RELOAD, GR_HANDS, GR_DEAD, GR_WITNESS, GR_WANTED,
 } from '../../../shared/constants.js';
 import { Writer, Reader } from '../../../shared/net/codec.js';
@@ -17,6 +17,7 @@ import { HORSE, makeHorse, copyHorse } from '../../../shared/sim/moveHorse.js';
 import { makeActor, stepActor, WHISTLE_HEARD } from '../../../shared/sim/actor.js';
 import { GF, gunFields, copyGun, sameGun } from '../../../shared/sim/guns.js';
 import { Combat, HF, RESPAWN_TICKS } from './combat.js';
+import { Law, Lawman } from './law.js';
 import { SIN16, COS16 } from '../../../shared/sim/trig.js';
 import { rng32, seqDiff, yawOf, TAU } from '../../../shared/math.js';
 import { InterestGrid } from './interest.js';
@@ -48,7 +49,7 @@ const sameHorse = (a, b) => a.x === b.x && a.y === b.y && a.z === b.z && a.hx ==
 
 export class World {
   constructor(opts = {}) {
-    this.opts = Object.assign({ bots: 63, maxPlayers: MAX_PLAYERS, spawn: 'hub', roam: 0, seed: WORLD_SEED, hour: DAY_START_HOUR }, opts);
+    this.opts = Object.assign({ bots: 63, maxPlayers: MAX_PLAYERS, spawn: 'hub', roam: 0, seed: WORLD_SEED, hour: DAY_START_HOUR, lawmen: 4 }, opts);
     this.now = this.opts.now || (() => performance.now());
     this.field = makeField(this.opts.seed);
     this.grid = new InterestGrid();
@@ -63,7 +64,7 @@ export class World {
     this.mark = 0; this.tmp = []; this.cand = [];
     this.totals = { bytesOut: 0, bytesIn: 0, snapshots: 0, inputsDropped: 0, snapshotsSkipped: 0, kicked: 0, biggestSnapshot: 0, eventsSent: 0, eventsDropped: 0 };
     this.HIST = HIST;
-    this.combat = new Combat(this); this.law = null;
+    this.combat = new Combat(this); this.law = this.field.jail ? new Law(this) : null; this.posse = [];
     this.stScratch = makeStatus();
     this.syncBots();
   }
@@ -159,7 +160,10 @@ export class World {
     while (this.bots.length < want) {
       const n = this.bots.length, name = NAMES[n % NAMES.length] + (n >= NAMES.length ? ' ' + (1 + ((n / NAMES.length) | 0)) : ''), seed = rng32((this.opts.seed + n * 7919 + 13) >>> 0);
       let e, bot;
-      if (this.opts.spawn === 'spread') {                         // scattered wanderers, a third of them mounted
+      if (this.law && n < this.opts.lawmen && this.opts.spawn !== 'spread' && !(this.opts.roam > 0)) {   // the sheriff and his deputies come first
+        const d = this.field.jail.door; e = this.spawnEntity(n === 0 ? 'Sheriff Garrity' : 'Deputy ' + NAMES[(n * 7) % NAMES.length], true, d.x + (n - 1.5) * 5, d.z - 2, false);
+        e.ef |= EF_LAW; bot = new Lawman(e, seed, 'law', f, this.law); this.law.lawmen.push(bot);
+      } else if (this.opts.spawn === 'spread') {                         // scattered wanderers, a third of them mounted
         const at = this.spawnPoint(), horse = n % 3 === 0;
         e = this.spawnEntity(name, true, at[0], at[1], horse, horse); bot = new Bot(e, seed, 'wander', f, { x: at[0], z: at[1], r: 150 });
       } else if (this.opts.roam > 0) {                            // a crowd milling about the hub, for the worst-case tests
@@ -173,8 +177,20 @@ export class World {
         e = this.spawnEntity(name, true, HUB_X, HUB_Z, false); bot = new Bot(e, seed, 'town', f, place);
         bot.streetPoint(); const s = e.s, T = f.terrain; s.x = Math.fround(bot.tx); s.z = Math.fround(bot.tz); s.y = Math.fround(T.heightAt(s.x, s.z)); bot.wait = r() * 6;
       }
-      this.bots.push(bot);
+      e.bot = bot; this.bots.push(bot);
     }
+  }
+  // a lawman who is not one of the town's own: a posse rider, mounted, after p
+  addLawman(role, x, z, p) {
+    const n = this.posse.length, e = this.spawnEntity('Posse rider', true, x, z, true, true), seed = rng32((this.opts.seed + this.tick * 131 + n * 17) >>> 0);
+    e.ef |= EF_LAW; if (e.horse) e.horse.ef |= EF_LAW;
+    const b = new Lawman(e, seed, role, this.field, this.law, p); e.bot = b; this.posse.push(b); this.law.lawmen.push(b);
+    return b;
+  }
+  removeLawman(b) {
+    let i = this.posse.indexOf(b); if (i >= 0) this.posse.splice(i, 1);
+    i = this.law.lawmen.indexOf(b); if (i >= 0) this.law.lawmen.splice(i, 1);
+    this.removeEntity(b.e);
   }
 
   // ---- connections
@@ -274,8 +290,8 @@ export class World {
     const t0 = this.now(), tick = ++this.tick, field = this.field, t = tick / TICK_RATE;
 
     const now = this.serverNow();
-    for (let i = 0; i < this.bots.length; i++) {
-      const b = this.bots[i]; b.think(t, this);
+    for (const list of [this.bots, this.posse]) for (let i = 0; i < list.length; i++) {
+      const b = list[i]; if (b.e.gone) continue; b.think(t, this);
       for (let k = 0; k < CMDS_PER_TICK; k++) { stepActor(b.e.a, b.cmd, field); if (b.e.a.fired) this.combat.fire(b.e, now, null); }
       b.e.aimYaw = b.cmd.yaw;
     }

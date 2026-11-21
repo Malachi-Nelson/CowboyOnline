@@ -13,6 +13,8 @@ import { createTrees } from './render/trees.js';
 import { createTowns } from './render/towns.js';
 import { createWeather } from './render/weather.js';
 import { createFigures } from './render/figures.js';
+import { createEffects } from './render/effects.js';
+import { createNerve } from './player/nerve.js';
 import { createCamera } from './player/camera.js';
 import { createControls } from './input/controls.js';
 import { createHud } from './ui/hud.js';
@@ -23,8 +25,12 @@ import { WsTransport, LagTransport } from './net/transport.js';
 import { LocalTransport } from './net/local.js';
 import { makeField } from '../../shared/world/field.js';
 import { weatherAt } from '../../shared/world/weather.js';
-import { HUB_X, HUB_Z, EF_BOT, KIND_HORSE, ST_RIDING, WORLD_SEED, TICK_MS } from '../../shared/constants.js';
+import { HUB_X, HUB_Z, EF_BOT, KIND_HORSE, ST_RIDING, WORLD_SEED, TICK_MS, GR_WITNESS, GR_WANTED, GR_DEAD } from '../../shared/constants.js';
 import { horseNear } from '../../shared/sim/moveHorse.js';
+import { GUNS, AIM, GF } from '../../shared/sim/guns.js';
+import { EV, STRUCK, ZONE, NOTE } from '../../shared/net/messages.js';
+import { rayGround, rayPerson, rayHorse } from '../../shared/world/raycast.js';
+import { placeAt } from './ui/hud.js';
 
 const $ = id => document.getElementById(id);
 const app = $('app'), canvas = $('view'), status = $('status');
@@ -40,7 +46,8 @@ const LAGS = [0, 150, 300];
 // before the world is built: just the sky
 const fallbackCam = new globalThis.THREE.PerspectiveCamera(58, 1, 0.3, 3000); fallbackCam.position.set(HUB_X, 60, HUB_Z + 60); fallbackCam.lookAt(HUB_X, 40, HUB_Z);
 let session = null, lagT = null, inner = null, local = null;       // local: the world in this tab, when that is what we are in
-let field = null, world = null, figures = null, camera = null, map = null, seedBuilt = -1, building = false;
+let field = null, world = null, figures = null, camera = null, map = null, effects = null, seedBuilt = -1, building = false;
+const nerve = createNerve(controls, sound, view);
 
 // everything drawn that comes from the world's seed: built once, when the first welcome says which world this is
 function buildWorld(f) {
@@ -48,6 +55,7 @@ function buildWorld(f) {
   const t0 = performance.now(), terrain = createTerrain(view.scene, f, view.env);
   world = { terrain, water: createWater(view.scene, f), trees: createTrees(view.scene, f), towns: createTowns(view.scene, f), weather: createWeather(view.scene), ms: 0 };
   if (!figures) figures = createFigures(view.scene, f); else figures.setField(f);
+  if (effects) effects.dispose(); effects = createEffects(view.scene, f);
   camera = createCamera(f); size();
   map = createMap(store, f, makeMapImage(f, terrain)); hud.map = map;
   ground(store.state.grid);
@@ -77,6 +85,8 @@ function connect(url) {
     hud.resetWorst(); hud.resetPlace();
   };
   s.onwhistle = e => sound.whistle(Math.hypot(e.x - s.x, e.z - s.z));
+  s.onshot = (a, seq) => ownShot(s, a);
+  s.onevent = ev => onEvent(s, ev);
   s.onclose = reason => {
     if (s !== session) return;
     const why = s.state === 'rejected' ? s.reason : reason || 'The connection closed.';
@@ -136,8 +146,8 @@ addEventListener('keydown', e => {
   else if (e.code === 'KeyM' && map && !e.repeat) { map.toggle(); if (map.open) controls.releaseLock(); else if (!coarse && canvas.requestPointerLock) { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (err) { /* drag */ } } }
   else if (e.code === 'Escape') { if (map && map.open) map.close(); else store.set({ mode: 'menu' }); }
   else if (e.code === 'KeyL') cyclePing();
-  else if (e.code === 'KeyB') tBands();
-  else if (e.code === 'KeyG') tGrid();
+  else if (e.code === 'KeyB' && store.state.showStats) tBands();
+  else if (e.code === 'KeyG' && store.state.showStats) tGrid();
 });
 $('mapClose').addEventListener('click', () => canvas.focus());
 
@@ -146,10 +156,14 @@ const tags = $('tags'), tagOf = new Map(), V = new globalThis.THREE.Vector3();
 function nameTags(w, h) {
   for (const [id, el] of tagOf) if (!session.ents.has(id)) { el.remove(); tagOf.delete(id); }
   for (const e of session.ents.values()) {
-    if ((e.ef & EF_BOT) || e.kind === KIND_HORSE) continue;
-    let el = tagOf.get(e.id); if (!el) { el = document.createElement('span'); el.textContent = e.name; tags.appendChild(el); tagOf.set(e.id, el); }
+    if (e.kind === KIND_HORSE) continue;
+    const witness = (e.gear & GR_WITNESS) !== 0 && !(e.gear & GR_DEAD);
+    if ((e.ef & EF_BOT) && !witness) { const old = tagOf.get(e.id); if (old) { old.remove(); tagOf.delete(e.id); } continue; }
+    let el = tagOf.get(e.id); if (!el) { el = document.createElement('span'); tags.appendChild(el); tagOf.set(e.id, el); }
+    const text = witness ? '!' : e.name; if (el.textContent !== text) el.textContent = text;
+    el.className = witness ? 'witness' : (e.gear & GR_WANTED) ? 'wanted' : '';
     V.set(e.x, e.y + ((e.st & ST_RIDING) ? 2.95 : 2.15), e.z); const d = V.distanceTo(camera.cam.position); V.project(camera.cam);
-    const on = d < 60 && V.z < 1 && Math.abs(V.x) < 1.1 && Math.abs(V.y) < 1.1;
+    const on = d < (witness ? 90 : 60) && V.z < 1 && Math.abs(V.x) < 1.1 && Math.abs(V.y) < 1.1;
     el.hidden = !on; if (on) el.style.transform = `translate(${((V.x + 1) / 2 * w).toFixed(1)}px, ${((1 - V.y) / 2 * h).toFixed(1)}px) translate(-50%, -100%)`;
   }
 }
@@ -165,8 +179,107 @@ function horseSounds() {
   lastMode = h.mode; lastRide = a.riding;
 }
 
+// ---- gunfire, as this screen shows it
+const TAU = Math.PI * 2, hitP = { x: 0, y: 0, z: 0, nx: 0, ny: 1, nz: 0, struck: 0 }, gnd = { water: false }, pz = { zone: 0 };
+const me = { aiming: false, aimYaw: 0, pitch: 0, hurt: 0, hurtZone: 0, hurtYaw: 0 };
+// Where a shot from (ox, oy, oz) going (dx, dy, dz) lands among what is drawn here, and what it strikes. The server
+// decides what was really hit; this is for the dust and the splinters.
+function traceLocal(ox, oy, oz, dx, dy, dz, range, skip, out = hitP) {
+  const B = field.boxes; let t = B.ray(ox, oy, oz, dx, dy, dz, range), struck = t < range ? STRUCK.WOOD : STRUCK.AIR, box = B.hit;
+  const tt = field.trees.ray(ox, oy, oz, dx, dy, dz, t); if (tt < t) { t = tt; struck = STRUCK.TREE; }
+  const tg = rayGround(field.terrain, ox, oy, oz, dx, dy, dz, t, gnd); if (tg < t) { t = tg; struck = gnd.water ? STRUCK.WATER : STRUCK.GROUND; }
+  for (const e of session.ents.values()) {
+    if (e === skip || (e.kind !== KIND_HORSE && (e.gear & GR_DEAD))) continue;
+    const tb = e.kind === KIND_HORSE ? rayHorse(ox, oy, oz, dx, dy, dz, e.x, e.y, e.z, e.yaw, t) : rayPerson(ox, oy, oz, dx, dy, dz, e.x, e.y, e.z, (e.st & ST_RIDING) !== 0, t, pz);
+    if (tb < t) { t = tb; struck = e.kind === KIND_HORSE ? STRUCK.HORSE : STRUCK.BODY; }
+  }
+  out.x = ox + dx * t; out.y = oy + dy * t; out.z = oz + dz * t; out.struck = struck; out.t = t;
+  // the way the surface faces: a wall's face, the slope of the ground, straight up off water, back at the gun off a body
+  if (struck === STRUCK.WOOD && box) {
+    const c = [[out.x - box.x0, -1, 0, 0], [box.x1 - out.x, 1, 0, 0], [out.y - box.y0, 0, -1, 0], [box.y1 - out.y, 0, 1, 0], [out.z - box.z0, 0, 0, -1], [box.z1 - out.z, 0, 0, 1]].sort((p, q) => Math.abs(p[0]) - Math.abs(q[0]))[0];
+    out.nx = c[1]; out.ny = c[2]; out.nz = c[3];
+  } else if (struck === STRUCK.GROUND) { const T = field.terrain, gx = T.heightAt(out.x - 0.5, out.z) - T.heightAt(out.x + 0.5, out.z), gz = T.heightAt(out.x, out.z - 0.5) - T.heightAt(out.x, out.z + 0.5), l = Math.hypot(gx, 1, gz); out.nx = gx / l; out.ny = 1 / l; out.nz = gz / l; }
+  else if (struck === STRUCK.WATER) { out.nx = 0; out.ny = 1; out.nz = 0; }
+  else { out.nx = -dx; out.ny = -dy; out.nz = -dz; }
+  return out;
+}
+// where the muzzle of a gun held out along (yaw, pitch) is, for someone standing (or riding) at (x, y, z)
+function muzzleOf(x, y, z, yaw, pitch, riding, out) {
+  const cp = Math.cos(pitch), fx = -Math.sin(yaw) * cp, fy = Math.sin(pitch), fz = -Math.cos(yaw) * cp, rx = Math.cos(yaw), rz = -Math.sin(yaw);
+  out[0] = x + rx * 0.28 + fx * 0.9; out[1] = y + (riding ? 2.25 : 1.43) + fy * 0.9; out[2] = z + rz * 0.28 + fz * 0.9;
+  return out;
+}
+const mz = [0, 0, 0];
+const inTown = (x, z) => !!(field && placeAt(field, x, z, 0));
+const snowy = (x, y, z) => field.terrain.maskAt(x, z, 0) > 0.5 || y > 250;
+function ownShot(s, a) {
+  if (!effects || !field) return;
+  const G = GUNS[a.fired], h = traceLocal(a.ox, a.oy, a.oz, a.dx, a.dy, a.dz, G.range, null);
+  muzzleOf(s.x, s.y, s.z, controls.intent.yaw, controls.intent.pitch, a.riding, mz);
+  effects.muzzle(mz[0], mz[1], mz[2], a.dx, a.dy, a.dz, a.fired, true);
+  effects.tracer(mz[0], mz[1], mz[2], h.x, h.y, h.z);
+  if (h.struck !== STRUCK.AIR) effects.impact(h.x, h.y, h.z, h.nx, h.ny, h.nz, h.struck, snowy(h.x, h.y, h.z));
+  if (h.struck === STRUCK.WOOD) effects.hole(h.x, h.y, h.z, h.nx, h.ny, h.nz);
+  sound.shot(a.fired, 0, inTown(s.x, s.z)); if (h.struck !== STRUCK.AIR) sound.impact(h.struck, h.t);
+  setTimeout(() => sound.cock(a.fired === 2 ? 2 : 1), a.fired === 2 ? 260 : 170);
+  figures.kickSelf(); if (camera) camera.recoil(a.fired === 2 ? 0.035 : 0.024);
+  nerve.shot();
+}
+const NOTES = {
+  [NOTE.SEEN]: () => 'Someone saw that.', [NOTE.WITNESS]: v => `${v === 1 ? 'A witness is' : v + ' witnesses are'} going to the law.`,
+  [NOTE.REPORTED]: () => 'A witness has told the law.', [NOTE.WANTED]: v => `Wanted. $${v} on your head.`,
+  [NOTE.ESCAPED]: v => `You got away${v ? `. The $${v} bounty stands` : ''}.`, [NOTE.ARRESTED]: () => 'Arrested.', [NOTE.RELEASED]: () => 'You have done your time. You are free to go.',
+  [NOTE.LAW_SEES]: () => 'The law has spotted you.', [NOTE.LOST_THEM]: () => 'Out of sight. Keep moving.', [NOTE.POSSE]: () => 'A posse is riding out after you.',
+};
+function onEvent(s, ev) {
+  if (!effects || !field) return;
+  const now = performance.now();
+  if (ev.type === EV.SHOT) {
+    if (ev.id === s.id) return;                                    // already shown, the moment the trigger went
+    const e = s.ents.get(ev.id); if (!e) return;
+    const yaw = ev.yaw / 65536 * TAU, pitch = ev.pitch / 65536 * TAU, cp = Math.cos(pitch), dx = -Math.sin(yaw) * cp, dy = Math.sin(pitch), dz = -Math.cos(yaw) * cp;
+    const riding = (e.st & ST_RIDING) !== 0, sh = riding ? AIM.rideShoulder : AIM.shoulder, hd = (riding ? AIM.rideHead : AIM.head) + AIM.up;
+    const ox = e.x + Math.cos(yaw) * sh, oy = e.y + hd, oz = e.z - Math.sin(yaw) * sh, ex = ox + dx * ev.dist, ey = oy + dy * ev.dist, ez = oz + dz * ev.dist;
+    const d = Math.hypot(e.x - s.x, e.z - s.z);
+    muzzleOf(e.x, e.y, e.z, yaw, pitch, riding, mz);
+    effects.muzzle(mz[0], mz[1], mz[2], dx, dy, dz, ev.gun, d < 60);
+    effects.tracer(mz[0], mz[1], mz[2], ex, ey, ez);
+    if (ev.struck !== STRUCK.AIR) {
+      const h = traceLocal(ox, oy, oz, dx, dy, dz, ev.dist + 0.5, null);       // for the surface's facing
+      effects.impact(ex, ey, ez, h.nx, h.ny, h.nz, ev.struck, snowy(ex, ey, ez));
+      if (ev.struck === STRUCK.WOOD) effects.hole(ex, ey, ez, h.nx, h.ny, h.nz);
+      sound.impact(ev.struck, Math.hypot(ex - s.x, ez - s.z));
+    }
+    sound.shot(ev.gun, d, inTown(e.x, e.z));
+    // close past this player's head: the crack of it going by
+    const px = s.x - ox, py = s.y + 1.6 - oy, pz2 = s.z - oz, along = px * dx + py * dy + pz2 * dz;
+    if (along > 2 && along < ev.dist + 1) { const miss = Math.sqrt(Math.max(0, px * px + py * py + pz2 * pz2 - along * along)); if (miss < 4) sound.whiz(miss); }
+    figures.kick(e.anim);
+  } else if (ev.type === EV.HIT) {
+    const yaw = ev.yaw / 65536 * TAU;
+    if (ev.id === s.id) {
+      me.hurt = 1; me.hurtZone = ev.zone; me.hurtYaw = yaw;
+      hud.damage(-((yaw + Math.PI) - controls.intent.yaw)); sound.hurt(ev.dmg >= 40);
+      effects.impact(s.x, s.y + (ev.zone === ZONE.HEAD ? 1.6 : ev.zone === ZONE.LEGS ? 0.6 : 1.2) + (s.a.riding ? 0.8 : 0), s.z, Math.sin(yaw), 0.2, Math.cos(yaw), STRUCK.BODY);
+    } else {
+      const v = s.ents.get(ev.id);
+      if (v && ev.zone !== ZONE.HORSE) {
+        v.hurt = 1; v.hurtZone = ev.zone; v.hurtYaw = yaw;
+        const rid = (v.st & ST_RIDING) ? 0.8 : 0, y = v.y + rid + (ev.zone === ZONE.HEAD ? 1.6 : ev.zone === ZONE.LEGS ? 0.55 : 1.15);
+        if (ev.by !== s.id) effects.impact(v.x, y, v.z, -Math.sin(yaw), 0.2, -Math.cos(yaw), STRUCK.BODY);
+      } else if (v) { effects.impact(v.x, v.y + 1.2, v.z, -Math.sin(yaw), 0.2, -Math.cos(yaw), STRUCK.HORSE); }
+    }
+    if (ev.by === s.id && ev.zone !== ZONE.HORSE) { hud.hit(false); s.stats.hitsMade = (s.stats.hitsMade || 0) + 1; }
+  } else if (ev.type === EV.DIE) {
+    if (ev.by === s.id && ev.id !== s.id) hud.hit(true);
+    if (ev.id === s.id) { const k = s.ents.get(ev.by); s.killer = k ? (k.name || 'someone') : ''; nerve.end(); }
+  } else if (ev.type === EV.NOTE) {
+    const f = NOTES[ev.code]; if (f) hud.note(f(ev.value), now);
+  }
+}
+
 // ---- every frame
-let prev = performance.now(), frames = 0;
+let prev = performance.now(), frames = 0, prevCool = 0, prevRounds = 0;
 const wx = {};
 function frame() {
   const now = performance.now(), gap = now - prev, dt = Math.min(0.1, gap / 1000); prev = now; frames++;
@@ -174,6 +287,7 @@ function frame() {
   // read, and the game would fall seconds behind. Below about 12 frames a second, let them through first.
   if (gap > 80) setTimeout(() => requestAnimationFrame(frame), 0); else requestAnimationFrame(frame);
   if (!session || session.state !== 'playing' || !field || building || !world) { view.render(fallbackCam); return; }
+  if (camera) nerve.frame(session, camera, field, now);              // Iron Nerve may steer the aim this frame
   session.frame(now);
   if (holding) return;                                             // an automated picture is being taken of the last frame drawn
   const playing = store.state.mode === 'play', a = session.a, i = controls.intent, time = now / 1000;
@@ -182,12 +296,18 @@ function frame() {
   const hour = forced.hour !== undefined ? forced.hour : session.hour(now), w = forced.weather || weatherAt(now + session.tOff, session.x, session.z, field.terrain, field.seed, wx);
   view.setTime(hour, w.mist, w.cloud);
   const pc = typeof photo === 'function' ? photo(session) : photo;
+  const aimUp = playing && i.aim && a.slot !== 0 && !a.swap && !a.dead ? 1 : 0, inFocus = (a.gfl & GF.IN_FOCUS) ? 1 : 0;
   if (pc) { camera.cam.position.set(pc[0], pc[1], pc[2]); camera.cam.lookAt(pc[3], pc[4], pc[5]); }
-  else if (playing) camera.follow(session.x, session.y, session.z, i.yaw, i.pitch, speed, dt, riding);
+  else if (playing) camera.follow(session.x, session.y, session.z, i.yaw, i.pitch, speed, dt, riding, aimUp, inFocus);
   else camera.circle(HUB_X - 30, field.base, HUB_Z, still ? 0 : dt);
   const eye = camera.cam.position, fx = playing && !photo ? session.x : eye.x, fz = playing && !photo ? session.z : eye.z;
   world.terrain.update(fx, fz, eye); world.trees.update(fx, fz, time); world.water.update(time, view.env, eye); world.towns.update(view.env); world.weather.update(w, camera.cam, time, view.env);
-  figures.update(session, dt, store.state.bandTint, true, playing ? sound : null, view.env);
+  me.aiming = !!aimUp; me.aimYaw = i.yaw; me.pitch = i.pitch; me.hurt = Math.max(0, me.hurt - dt * 2.5);
+  figures.update(session, dt, store.state.bandTint, true, playing ? sound : null, view.env, me);
+  effects.update(dt, view.scene.fog);
+  // the gun's own small sounds: a round going in, the hammer falling on nothing
+  const rounds = a.m1 + a.m2; if (rounds > prevRounds && a.rel >= 0 && prevRounds >= 0) sound.load(0); prevRounds = rounds;
+  if (a.cool === 12 && prevCool !== 12 && !a.fired) sound.click(0); prevCool = a.cool;
   view.render(camera.cam);
   if (holdWhen && holdWhen(session)) { holding = true; holdWhen = null; }
   if (playing) {
@@ -196,6 +316,7 @@ function frame() {
     hud.stats(session, now, local ? local.total : 0, store.state.lag);
     hud.minimap(session, field, i.yaw, now, mapImageOf());
     hud.frame(session, field, i, now, hour, coarse);
+    hud.combat(session, i, now, camera.cam.fov, camera.aiming, speed);
     nameTags(canvas.clientWidth, canvas.clientHeight);
     if (map.open) map.draw(session, hour, i.yaw);
     if (coarse && riding !== touchRiding) { touchRiding = riding; $('tUse').textContent = riding ? 'Get down' : 'Mount'; $('tRun').textContent = riding ? 'Gallop' : 'Run'; }

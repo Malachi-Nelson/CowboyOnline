@@ -113,6 +113,18 @@ export function buildTowns(terrain, boxes, seed) {
   // the ranch corral, with a gap for a gate on its north side
   { const x0 = ranch.x - 22, x1 = ranch.x + 14, z0 = ranch.z + 12, z1 = ranch.z + 40, yy = ranch.y; fence(x0, z0, x0 + 13, z0, yy); fence(x0 + 18, z0, x1, z0, yy); fence(x0, z1, x1, z1, yy); fence(x0, z0, x0, z1, yy); fence(x1, z0, x1, z1, yy); }
 
+  // ---- the lock-up behind the sheriff's office: an iron cage with a plank roof, closed on every side. Whoever the law
+  // takes in is put inside, and let out at the office door when their time is done.
+  let jail = null;
+  {
+    const sh = buildings.find(b => b.sign === 'SHERIFF'), x0 = sh.x0 + 1.5, x1 = x0 + 3.6, z0 = sh.z1 + 1.2, z1 = z0 + 3.6, t = 0.1, H = 2.6;
+    boxes.solid(x0, x1, y - 1, y + H, z0, z0 + t); boxes.solid(x0, x1, y - 1, y + H, z1 - t, z1);
+    boxes.solid(x0, x0 + t, y - 1, y + H, z0, z1); boxes.solid(x1 - t, x1, y - 1, y + H, z0, z1);
+    boxes.solid(x0 - 0.25, x1 + 0.25, y + H, y + H + 0.18, z0 - 0.25, z1 + 0.25);
+    props.push({ kind: 'cell', x0, x1, z0, z1, y, h: H });
+    jail = { x: (x0 + x1) / 2, z: (z0 + z1) / 2, y, door: { x: (sh.x0 + sh.x1) / 2, z: sh.z0 - 4.5 }, office: { x0: sh.x0, x1: sh.x1, z0: sh.z0, z1: sh.z1 } };
+  }
+
   // ---- the things that make a place look used: lamps along the main street, a water tower, a windmill, wagons
   for (let x = 1902; x < 2096; x += 24) for (const side of [-1, 1]) {
     if (x > 1974 && x < 1996) continue;                                         // the mouth of the cross street
@@ -143,5 +155,5 @@ export function buildTowns(terrain, boxes, seed) {
     poles.push(line);
   }
 
-  return { buildings, props, streets, bridge, poles };
+  return { buildings, props, streets, bridge, poles, jail };
 }

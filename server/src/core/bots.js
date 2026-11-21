@@ -4,7 +4,8 @@
 //   riders      on the roads between places; at the end of one they step down, stretch their legs, whistle the
 //               horse back and ride on
 //   wanderers   scattered over open country, for load tests
-// What they do is only enough to make the territory look lived in. Proper behaviour arrives with the AI in Phase 4.
+// What they do is enough to make the territory look lived in, and to react to gunfire: anyone near a shot scatters,
+// and anyone who saw a crime runs to tell the sheriff (law.js decides who saw what). Lawmen are in law.js.
 import { TICK_RATE, WORLD_SIZE } from '../../../shared/constants.js';
 import { TAU, yawOf } from '../../../shared/math.js';
 import { BTN } from '../../../shared/sim/moveFoot.js';
@@ -22,6 +23,7 @@ export class Bot {
     this.tx = e.s.x; this.tz = e.s.z; this.pace = 0; this.wait = rand() * 4; this.until = 0;
     this.lx = e.s.x; this.lz = e.s.z; this.checkAt = 0; this.slow = 0;
     this.road = null; this.ri = 0; this.dir = 1; this.mode = role === 'rider' ? 'ride' : 'walk'; this.pressed = false; this.timer = 0;
+    this.w = null; this.witness = null; this.fleeX = 0; this.fleeZ = 0; this.fleeUntil = 0;
     if (role === 'rider') this.pickRoad(null);
   }
   // a spot on one of the streets of the bot's own place
@@ -47,10 +49,36 @@ export class Bot {
   // start somewhere along a road rather than at its end, so riders are spread over the country from the first tick
   startOnRoad(rd, at, dir) { this.road = rd; this.ri = at; this.dir = dir; }
 
-  think(t) {
+  // gunfire near by: get away from (x, z) for a while
+  scare(x, z, tick) { this.fleeX = x; this.fleeZ = z; this.fleeUntil = tick + (7 + this.rand() * 5) / DT; this.wait = 0; }
+  onHurt(by, tick) { this.scare(by ? by.s.x : this.e.s.x, by ? by.s.z : this.e.s.z, tick); }
+  onDeath() { this.witness = null; this.fleeUntil = 0; }
+  // dead a while: someone new in their place, somewhere they would be
+  respawn() {
+    const W = this.w, e = this.e; if (!W) return;
+    if (this.role === 'town') { this.streetPoint(); W.combat.revive(e, this.tx, this.tz); this.wait = 2; }
+    else if (this.role === 'rider') { const rd = this.road || W.field.terrain.roads[1], i = (this.rand() * (rd.n - 1)) | 0; W.combat.revive(e, rd.x[i], rd.z[i]); this.mode = 'call'; this.timer = 0; }
+    else W.combat.revive(e, this.home.x, this.home.z);
+    W.moved(e); if (e.horse) W.moved(e.horse);
+  }
+  think(t, world) {
     const e = this.e, s = e.s, a = e.a, c = this.cmd, r = this.rand;
+    this.w = world || this.w;
     c.mx = 0; c.mz = 0; c.buttons = 0;
+    if (a.dead) return;
     if (this.pressed) { this.pressed = false; return; }           // let go of the key for a tick, so the next press is a new one
+    const tick = this.w ? this.w.tick : 0;
+    // a witness runs to the sheriff's office (or, out of town, away from what they saw); anyone scared runs from the noise
+    if (this.witness || tick < this.fleeUntil) {
+      let tx = s.x, tz = s.z;
+      const J = this.w && this.w.field.jail, wt = this.witness;
+      if (wt && J && Math.hypot(J.door.x - s.x, J.door.z - s.z) < 450) { tx = J.door.x; tz = J.door.z; }
+      else { const fx = wt ? wt.criminal.s.x : this.fleeX, fz = wt ? wt.criminal.s.z : this.fleeZ, dx = s.x - fx, dz = s.z - fz, l = Math.hypot(dx, dz) || 1; tx = s.x + dx / l * 20; tz = s.z + dz / l * 20; }
+      const dx = tx - s.x, dz = tz - s.z;
+      if (dx * dx + dz * dz > 4) { c.yaw = yaw16(dx, dz); c.mz = 127; c.buttons = BTN.SPRINT; }
+      if (a.riding) { c.buttons = BTN.SPRINT; if (this.road && !wt) return this.rider(t); }
+      return;
+    }
     if (this.wait > 0) { this.wait -= DT; return; }
 
     // going nowhere for two seconds while trying to: something is in the way, so think again

@@ -145,6 +145,7 @@ export class Combat {
       else if (p.hp < HP_MAX && tick - p.hurtAt > REGEN_AFTER && !p.a.jail) { p.hp += REGEN; if (p.hp > HP_MAX) p.hp = HP_MAX; }
     }
     for (const b of W.bots) if (b.e.a.dead && tick - b.e.deadAt >= BODY_TICKS) b.respawn(tick);
+    for (let i = W.posse.length - 1; i >= 0; i--) { const b = W.posse[i]; if (b.e.a.dead && tick - b.e.deadAt >= BODY_TICKS / 4) b.respawn(tick); }
   }
 
   // tell everyone who can see `a` (or `b`) about something that happened

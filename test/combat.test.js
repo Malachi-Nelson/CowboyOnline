@@ -2,7 +2,7 @@
 // cheats a client might try (shooting faster than the gun, shooting the past, claiming hits).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { rig } from './helpers.js';
+import { rig, aim, shooter, place } from './helpers.js';
 import { Writer, Reader } from '../shared/net/codec.js';
 import { MSG, EV, ZONE, STRUCK, encHello, encInputHead, encCmd, encHints, readSnapshot, readSelf } from '../shared/net/messages.js';
 import { HUB_X, HUB_Z, TICK_MS, REWIND_MAX, HP_MAX, KIND_HORSE } from '../shared/constants.js';
@@ -15,36 +15,6 @@ import { RESPAWN_TICKS } from '../server/src/core/combat.js';
 
 const w = new Writer(512), W = n => n << WEAPON_SHIFT;
 const EAST = 49152;
-// the yaw and pitch (steps of a turn) that put a shot from actor a's gun line through (tx, ty, tz)
-function aim(a, tx, ty, tz) {
-  let yaw = 0, pitch = 0;
-  for (let k = 0; k < 4; k++) {
-    const yi = Math.round(yaw / TAU * 65536) & 65535, sh = a.riding ? AIM.rideShoulder : AIM.shoulder, hd = (a.riding ? AIM.rideHead : AIM.head) + AIM.up;
-    const ox = a.f.x + COS16[yi] * sh, oy = a.f.y + hd, oz = a.f.z - SIN16[yi] * sh, dx = tx - ox, dy = ty - oy, dz = tz - oz;
-    yaw = Math.atan2(-dx, -dz); pitch = Math.atan2(dy, Math.hypot(dx, dz));
-  }
-  return { yaw: Math.round(yaw / TAU * 65536) & 65535, pitch: Math.round(pitch / TAU * 65536) };
-}
-// a raw player: sends a packet of three inputs every tick; `hold` is what is pressed, `fire` presses the trigger once
-function shooter(r, name) {
-  const raw = r.raw(); w.reset(); raw.send(encHello(w, name, ''));
-  const p = raw.c.player; let seq = 1;
-  const o = {
-    raw, p, buttons: W(1) | BTN.AIM, yaw: 0, pitch: 0, mx: 0, mz: 0, viewAge: 100, hints: [],
-    // one tick's worth of input
-    send(fireAt = -1) {
-      encInputHead(w, seq, 3, Math.floor(r.world.serverNow()) - o.viewAge);
-      for (let i = 0; i < 3; i++) encCmd(w, o.mx, o.mz, o.yaw, o.pitch, o.buttons | (i === fireAt ? BTN.FIRE : 0));
-      encHints(w, fireAt >= 0 ? o.hints.map(h => ({ ...h, seq: seq + fireAt })) : []);
-      raw.send(w.bytes()); seq = (seq + 3) & 65535;
-    },
-    // keep sending for n ticks while the world runs
-    hold(n) { for (let i = 0; i < n; i++) { o.send(); r.run(TICK_MS); } },
-    fire() { o.send(2); r.run(TICK_MS); },
-  };
-  return o;
-}
-const place = (p, x, z, field) => { p.s.x = Math.fround(x); p.s.z = Math.fround(z); p.s.y = field.base; p.s.vx = p.s.vz = 0; if (p.a.h) { p.a.h.x = Math.fround(x + 30); p.a.h.z = Math.fround(z + 40); p.a.h.y = field.terrain.heightAt(p.a.h.x, p.a.h.z); } };
 const events = (raw, type) => { const out = []; for (const b of raw.got) if (b[0] === MSG.SNAPSHOT) { const rd = new Reader(b); rd.u8(); readSnapshot(rd, { self: (t, a, x) => readSelf(x, makeActor(0, 0, 0, true)), event: (t, ev) => { if (ev.type === type) out.push(ev); }, despawn() {}, spawn() {}, update() {} }); } return out; };
 
 test('a shot lands where it is aimed: 34 to the body, three to drop a man, and one to the head', () => {

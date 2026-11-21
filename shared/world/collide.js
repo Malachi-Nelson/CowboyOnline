@@ -62,9 +62,9 @@ export class BoxWorld {
     }
     return g;
   }
-  // Distance along a ray to the nearest box, or maxT. Walks the grid cell by cell. (Used from Phase 4 on.)
+  // Distance along a ray to the nearest box, or maxT; the box it met is left in this.hit. Walks the grid cell by cell.
   ray(ox, oy, oz, dx, dy, dz, maxT) {
-    let best = maxT; const stamp = ++this.stamp;
+    let best = maxT; const stamp = ++this.stamp; this.hit = null;
     let cx = Math.floor(ox / CELL), cz = Math.floor(oz / CELL);
     const sx = dx > 0 ? 1 : -1, sz = dz > 0 ? 1 : -1, adx = Math.abs(dx), adz = Math.abs(dz);
     const tDX = adx > 1e-9 ? CELL / adx : Infinity, tDZ = adz > 1e-9 ? CELL / adz : Infinity;
@@ -72,7 +72,7 @@ export class BoxWorld {
     let tMZ = adz > 1e-9 ? (dz > 0 ? (cz + 1) * CELL - oz : oz - cz * CELL) / adz : Infinity;
     for (let guard = 0; guard < 400; guard++) {
       const L = this.grid.get(cz * SPAN + cx);
-      if (L) for (let i = 0; i < L.length; i++) { const b = L[i]; if (b.rs === stamp) continue; b.rs = stamp; const h = rayBox(ox, oy, oz, dx, dy, dz, b); if (h < best) best = h; }
+      if (L) for (let i = 0; i < L.length; i++) { const b = L[i]; if (b.rs === stamp) continue; b.rs = stamp; const h = rayBox(ox, oy, oz, dx, dy, dz, b); if (h < best) { best = h; this.hit = b; } }
       const tExit = tMX < tMZ ? tMX : tMZ;
       if (best <= tExit || tExit >= maxT) break;
       if (tMX < tMZ) { cx += sx; tMX += tDX; } else { cz += sz; tMZ += tDZ; }

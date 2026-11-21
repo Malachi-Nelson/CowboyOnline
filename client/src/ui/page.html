@@ -1,6 +1,7 @@
 <div id="app">
 <canvas id="view" tabindex="0" aria-label="Calder Territory, seen from behind your character"></canvas>
 <div id="tags" aria-hidden="true"></div>
+<div id="nerve" aria-hidden="true"></div>
 
 <div id="hud" hidden>
   <div id="place" hidden><span class="name"></span><span class="sub"></span></div>
@@ -37,7 +38,24 @@
       <svg viewBox="0 0 44 44" aria-hidden="true"><circle class="track" cx="22" cy="22" r="18"/><circle id="coreRing" class="fill" cx="22" cy="22" r="18"/>
         <path class="glyph" d="M16 31c0-4 1-7 3-9l-3-2c-1-1 0-3 1-3l5 1 3-4c1-1 2 0 2 1v3c2 1 3 3 3 5l-2 1-2-2-2 3v6z"/></svg>
     </div>
+    <div id="hpCore" class="core" title="Your health">
+      <svg viewBox="0 0 44 44" aria-hidden="true"><circle class="track" cx="22" cy="22" r="18"/><circle id="hpRing" class="fill" cx="22" cy="22" r="18"/>
+        <path class="glyph" d="M22 30.5l-1.2-1.1C16.5 25.6 14 23.3 14 20.4c0-2.3 1.8-4.1 4.1-4.1 1.3 0 2.6.6 3.4 1.6.8-1 2.1-1.6 3.4-1.6 2.3 0 4.1 1.8 4.1 4.1 0 2.9-2.5 5.2-6.8 9z"/></svg>
+    </div>
+    <div id="nerveCore" class="core" title="Iron Nerve">
+      <svg viewBox="0 0 44 44" aria-hidden="true"><circle class="track" cx="22" cy="22" r="18"/><circle id="nerveRing" class="fill" cx="22" cy="22" r="18"/>
+        <path class="glyph" d="M22 15.5c-4.6 0-8.4 3.4-9.5 6.5 1.1 3.1 4.9 6.5 9.5 6.5s8.4-3.4 9.5-6.5c-1.1-3.1-4.9-6.5-9.5-6.5zm0 10.3a3.8 3.8 0 110-7.6 3.8 3.8 0 010 7.6z"/></svg>
+    </div>
   </figure>
+
+  <div id="reticle" hidden><i></i><i></i><i></i><i></i><b></b></div>
+  <div id="hitmark" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+  <div id="dmgDir" aria-hidden="true"></div>
+  <section id="law" class="plate" hidden aria-live="polite"><p class="head"><span class="tag">Wanted</span><span class="bounty"></span></p><p class="what"></p></section>
+  <p id="note" aria-live="polite" hidden></p>
+  <div id="ammo" hidden><span class="gun"></span><span class="rounds"></span><span class="spare"></span></div>
+  <div id="down" hidden><p class="big"></p><p class="small"></p></div>
+  <div id="marks" aria-hidden="true"></div>
 
   <ul id="prompts" aria-live="polite"></ul>
 
@@ -46,6 +64,7 @@
 
   <div id="stick" hidden><i></i></div>
   <div id="thumbs"><button id="tWhistle" type="button">Whistle</button><button id="tUse" type="button">Mount</button><button id="tRun" type="button">Run</button><button id="tJump" type="button">Jump</button></div>
+  <div id="guns"><button id="tFocus" type="button">Nerve</button><button id="tReload" type="button">Reload</button><button id="tGun" type="button">Gun</button><button id="tAim" type="button">Aim</button><button id="tFire" type="button" class="fire">Fire</button></div>
 </div>
 
 <div id="map" hidden>
