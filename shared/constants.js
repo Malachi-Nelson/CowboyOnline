@@ -1,5 +1,5 @@
 // Numbers both sides must agree on. Change PROTOCOL_VERSION whenever anything on the wire changes.
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 // Time. The world ticks 20 times a second; a player's own movement runs 60 steps a second, one per input.
 export const TICK_RATE = 20;
@@ -39,9 +39,22 @@ export const Y_OFF = 64;
 export const KIND_PLAYER = 1;
 export const KIND_HORSE = 2;
 export const EF_BOT = 1;          // entity flag: driven by the server, not a person
+export const EF_LAW = 2;          // entity flag: a lawman
 // entity state bits, as other players see them
 export const ST_GROUND = 1;
 export const ST_SPRINT = 2;       // a person sprinting, a horse at a gallop
 export const ST_MOVE = 4;         // moving over the ground; a viewer may carry it forward a moment if an update is late
 export const ST_RIDING = 8;       // a person in the saddle: drawn on their horse, and their own position is not sent
 export const ST_WHISTLE = 16;     // a person whistling for their horse, for the half second it can be heard
+// a person's gear, as other players see it (sent beside the state bits)
+export const GR_SLOT = 3;         // which gun is in hand: 0 none, 1 revolver, 2 repeater
+export const GR_AIM = 4;          // gun raised
+export const GR_RELOAD = 8;
+export const GR_HANDS = 16;       // hands up
+export const GR_DEAD = 32;
+export const GR_WITNESS = 64;     // running to tell the law what they saw
+export const GR_WANTED = 128;     // wanted by the law
+
+// Combat. Lag compensation judges a shot against where everyone was when the shooter saw them, up to this far back.
+export const REWIND_MAX = 400;    // ms: measured 223 ms needed at 50 ms of ping, 326 at 150, 360 at 200 (see combat.js)
+export const HP_MAX = 100;

@@ -18,7 +18,7 @@ export class Bot {
   // role: 'town' | 'rider' | 'wander'. home: { x, z, r } for wanderers, a place id for townsfolk
   constructor(e, rand, role, field, home) {
     this.e = e; this.rand = rand; this.role = role; this.field = field; this.home = home;
-    this.cmd = { mx: 0, mz: 0, yaw: 0, buttons: 0 };
+    this.cmd = { mx: 0, mz: 0, yaw: 0, pitch: 0, buttons: 0 };
     this.tx = e.s.x; this.tz = e.s.z; this.pace = 0; this.wait = rand() * 4; this.until = 0;
     this.lx = e.s.x; this.lz = e.s.z; this.checkAt = 0; this.slow = 0;
     this.road = null; this.ri = 0; this.dir = 1; this.mode = role === 'rider' ? 'ride' : 'walk'; this.pressed = false; this.timer = 0;

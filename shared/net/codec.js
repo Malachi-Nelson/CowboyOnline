@@ -11,6 +11,7 @@ export class Writer {
   u8(v) { this.dv.setUint8(this.o, v); this.o += 1; }
   i8(v) { this.dv.setInt8(this.o, v); this.o += 1; }
   u16(v) { this.dv.setUint16(this.o, v, true); this.o += 2; }
+  i16(v) { this.dv.setInt16(this.o, v, true); this.o += 2; }
   u24(v) { this.dv.setUint16(this.o, v & 0xffff, true); this.dv.setUint8(this.o + 2, (v >>> 16) & 0xff); this.o += 3; }
   u32(v) { this.dv.setUint32(this.o, v, true); this.o += 4; }
   f32(v) { this.dv.setFloat32(this.o, v, true); this.o += 4; }
@@ -41,6 +42,7 @@ export class Reader {
   u8() { const v = this.dv.getUint8(this.o); this.o += 1; return v; }
   i8() { const v = this.dv.getInt8(this.o); this.o += 1; return v; }
   u16() { const v = this.dv.getUint16(this.o, true); this.o += 2; return v; }
+  i16() { const v = this.dv.getInt16(this.o, true); this.o += 2; return v; }
   u24() { const v = this.dv.getUint16(this.o, true) | (this.dv.getUint8(this.o + 2) << 16); this.o += 3; return v; }
   u32() { const v = this.dv.getUint32(this.o, true); this.o += 4; return v; }
   f32() { const v = this.dv.getFloat32(this.o, true); this.o += 4; return v; }

@@ -69,7 +69,37 @@ export function makeTrees(t, seed) {
       if (n) { const l = Math.sqrt((x - sx) * (x - sx) + (z - sz) * (z - sz)) || 1; out.nx = (x - sx) / l; out.nz = (z - sz) / l; }
       return n;
     },
+    // Distance along a ray to the first trunk it meets below the crown (TRUNK_H above the ground), or maxT. Walks
+    // the 8 m squares the ray crosses. For bullets; nothing that has to agree to the bit uses it.
+    ray(ox, oy, oz, dx, dy, dz, maxT) {
+      let best = maxT, cx = Math.floor(ox / TREE_CELL), cz = Math.floor(oz / TREE_CELL);
+      const stx = dx > 0 ? 1 : -1, stz = dz > 0 ? 1 : -1, adx = Math.abs(dx), adz = Math.abs(dz);
+      const tDX = adx > 1e-9 ? TREE_CELL / adx : Infinity, tDZ = adz > 1e-9 ? TREE_CELL / adz : Infinity;
+      let tMX = adx > 1e-9 ? (dx > 0 ? (cx + 1) * TREE_CELL - ox : ox - cx * TREE_CELL) / adx : Infinity;
+      let tMZ = adz > 1e-9 ? (dz > 0 ? (cz + 1) * TREE_CELL - oz : oz - cz * TREE_CELL) / adz : Infinity;
+      const hx = dx * dx + dz * dz;
+      for (let guard = 0; guard < 200; guard++) {
+        // a trunk may lean over from the next square, so look at the neighbours too
+        for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+          const qx = cx + i, qz = cz + j; if (qx < 0 || qz < 0 || qx >= N || qz >= N) continue;
+          const v = T[qz * N + qx]; if (!v || hx < 1e-12) continue;
+          const r = TRUNK[v & 7] * treeSize(v), px = ox - jx(qx, qz), pz = oz - jz(qx, qz);
+          const b = px * dx + pz * dz, c = px * px + pz * pz - r * r, disc = b * b - hx * c;
+          if (disc < 0) continue;
+          const t = (-b - Math.sqrt(disc)) / hx; if (t < 0 || t >= best) continue;
+          const y = oy + dy * t, g = t0Height(qx, qz);
+          if (y >= g - 0.5 && y <= g + TRUNK_H[v & 7] * treeSize(v)) best = t;
+        }
+        const tExit = tMX < tMZ ? tMX : tMZ;
+        if (best <= tExit || tExit >= maxT) break;
+        if (tMX < tMZ) { cx += stx; tMX += tDX; } else { cz += stz; tMZ += tDZ; }
+      }
+      return best;
+    },
   };
+  const t0Height = (qx, qz) => t.heightAt(jx(qx, qz), jz(qx, qz));
   return out;
 }
-export const NO_TREES = { T: null, x: 0, z: 0, nx: 0, nz: 0, pushOut() { return 0; } };
+// how high the bare trunk goes before the crown, for a tree of size 1, by kind (bullets pass through the crown)
+const TRUNK_H = [0, 5, 3.2, 4, 2.6, 5, 3.4, 4.5];
+export const NO_TREES = { T: null, x: 0, z: 0, nx: 0, nz: 0, pushOut() { return 0; }, ray(ox, oy, oz, dx, dy, dz, maxT) { return maxT; } };

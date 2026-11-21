@@ -7,20 +7,23 @@
 import {
   PROTOCOL_VERSION, TICK_RATE, TICK_MS, CMDS_PER_TICK, WORLD_SIZE, WORLD_SEED, HUB_X, HUB_Z, MAX_PLAYERS, DAY_MS, DAY_START_HOUR,
   VIEW_ENTER, VIEW_LEAVE, BAND_NEAR, BAND_MID, BAND_FAR, SNAPSHOT_BUDGET, KIND_PLAYER, KIND_HORSE, EF_BOT, ST_GROUND, ST_SPRINT, ST_MOVE, ST_RIDING, ST_WHISTLE,
+  HP_MAX, GR_AIM, GR_RELOAD, GR_HANDS, GR_DEAD, GR_WITNESS, GR_WANTED,
 } from '../../../shared/constants.js';
 import { Writer, Reader } from '../../../shared/net/codec.js';
-import { MSG, REJECT, UM, encWelcome, encReject, encPong, decHello, writeSnapshotHead, writeSpawn, spawnSize, qPos, qY, qYaw } from '../../../shared/net/messages.js';
+import { MSG, REJECT, UM, encWelcome, encReject, encPong, decHello, writeSnapshotHead, writeSpawn, spawnSize, qPos, qY, qYaw, writeStatus, sameStatus, makeStatus, writeEvent, EV_SIZE, STATUS_SIZE, SS } from '../../../shared/net/messages.js';
 import { makeField } from '../../../shared/world/field.js';
 import { FOOT, BTN_MASK } from '../../../shared/sim/moveFoot.js';
 import { HORSE, makeHorse, copyHorse } from '../../../shared/sim/moveHorse.js';
 import { makeActor, stepActor, WHISTLE_HEARD } from '../../../shared/sim/actor.js';
+import { GF, gunFields, copyGun, sameGun } from '../../../shared/sim/guns.js';
+import { Combat, HF, RESPAWN_TICKS } from './combat.js';
 import { SIN16, COS16 } from '../../../shared/sim/trig.js';
 import { rng32, seqDiff, yawOf, TAU } from '../../../shared/math.js';
 import { InterestGrid } from './interest.js';
 import { Metrics } from './metrics.js';
 import { Bot } from './bots.js';
 
-export const HIST = 32;                       // ticks of position history per entity (1.6 s), for lag compensation
+export const HIST = 32;                       // ticks of history per entity (1.6 s), for lag compensation: x, y, z, heading, flags
 const QUEUE = 64;                             // inputs a player may have waiting (about a second)
 const CREDIT_MAX = 30;                        // inputs a player may spend in one tick after a stall (half a second)
 const CREDIT_RATE = CMDS_PER_TICK * 1.02;     // inputs earned a tick: real time, plus 2% so a fast clock is not punished
@@ -31,8 +34,10 @@ const ID_REST_TICKS = 5 * TICK_RATE;          // an id is not handed out again f
 const FLOOD = 240;                            // messages a second before a connection is closed
 const ENTER2 = VIEW_ENTER * VIEW_ENTER, LEAVE2 = VIEW_LEAVE * VIEW_LEAVE;
 const NEAR2 = BAND_NEAR * BAND_NEAR, MID2 = BAND_MID * BAND_MID, FAR2 = BAND_FAR * BAND_FAR;
-const UPDATE_MAX = 21;                        // most bytes one entity update can take
-const NEUTRAL = { mx: 0, mz: 0, yaw: 0, buttons: 0 };
+const UPDATE_MAX = 22;                        // most bytes one entity update can take
+const NEUTRAL = { mx: 0, mz: 0, yaw: 0, pitch: 0, buttons: 3 << 10 };   // nothing pressed, and whatever is in hand stays there
+const STEP_MS = 1000 / 60;
+const HINTS = 16;                             // shot hints kept per player, waiting for their inputs to be stepped
 const NAMES = ['Abel', 'Ada', 'Amos', 'Boone', 'Clem', 'Cora', 'Eli', 'Ezra', 'Flora', 'Gus', 'Hank', 'Hattie', 'Ike', 'Jeb', 'Josiah', 'Levi', 'Lottie', 'Mabel', 'Minnie', 'Ned', 'Nell', 'Opal', 'Otis', 'Pearl', 'Rufus', 'Ruth', 'Seth', 'Silas', 'Tess', 'Tobias', 'Vera', 'Virgil', 'Walt', 'Zeke'];
 const utf8 = new TextEncoder();
 const byPrio = (a, b) => b.sort - a.sort;
@@ -56,7 +61,10 @@ export class World {
     this.metrics = new Metrics();
     this.w = new Writer(4096); this.w2 = new Writer(512); this.r = new Reader(new Uint8Array(0));
     this.mark = 0; this.tmp = []; this.cand = [];
-    this.totals = { bytesOut: 0, bytesIn: 0, snapshots: 0, inputsDropped: 0, snapshotsSkipped: 0, kicked: 0, biggestSnapshot: 0 };
+    this.totals = { bytesOut: 0, bytesIn: 0, snapshots: 0, inputsDropped: 0, snapshotsSkipped: 0, kicked: 0, biggestSnapshot: 0, eventsSent: 0, eventsDropped: 0 };
+    this.HIST = HIST;
+    this.combat = new Combat(this); this.law = null;
+    this.stScratch = makeStatus();
     this.syncBots();
   }
 
@@ -88,15 +96,16 @@ export class World {
   }
   entity(kind, ef, name, s, yaw) {
     const e = {
-      id: this.allocId(), kind, ef, name, nameBytes: utf8.encode(name).length, s, yaw, st: ST_GROUND,
+      id: this.allocId(), kind, ef, name, nameBytes: utf8.encode(name).length, s, yaw, st: ST_GROUND, gear: 0,
       qx: qPos(s.x), qy: qY(s.y), qz: qPos(s.z), qyaw: qYaw(yaw),
-      cell: -1, gone: false, still: 2, lastChange: this.tick, restAt: this.tick, moveStart: this.tick, hist: new Float32Array(HIST * 3),
-      a: null, horse: null, owner: null,
-      // people only
+      cell: -1, gone: false, still: 2, lastChange: this.tick, restAt: this.tick, moveStart: this.tick, hist: new Float32Array(HIST * 5),
+      a: null, horse: null, owner: null, bot: null,
+      // people only: health, and what the law makes of them (law.js)
+      hp: HP_MAX, hurtAt: -1e9, deadAt: 0, killedBy: 0, lastHurtBy: 0, law: null, aimYaw: 0,
       client: null, token: '', q: null, qHead: 0, qCount: 0, lastQueued: -1, credit: 0, ackSeq: 0, idle: 0, graceUntil: 0,
-      depthMin: 99, depthAt: 0, extra: 0, hSent: null,
+      depthMin: 99, depthAt: 0, extra: 0, hSent: null, gSent: null, hints: null,
     };
-    for (let i = 0; i < HIST; i++) { e.hist[i * 3] = s.x; e.hist[i * 3 + 1] = s.y; e.hist[i * 3 + 2] = s.z; }
+    for (let i = 0; i < HIST; i++) { const o = i * 5; e.hist[o] = s.x; e.hist[o + 1] = s.y; e.hist[o + 2] = s.z; e.hist[o + 3] = yaw; }
     this.ents.set(e.id, e); this.list.push(e); this.grid.add(e);
     return e;
   }
@@ -170,7 +179,7 @@ export class World {
 
   // ---- connections
   connect(conn) {
-    const c = { conn, player: null, view: new Map(), gone: [], fresh: true, viewDelay: 100, msgs: 0, bytesOut: 0, bytesIn: 0, outAcc: 0, outRate: 0, outPeak: 0, inAcc: 0, inRate: 0, inPeak: 0 };
+    const c = { conn, player: null, view: new Map(), gone: [], fresh: true, viewDelay: 100, msgs: 0, bytesOut: 0, bytesIn: 0, outAcc: 0, outRate: 0, outPeak: 0, inAcc: 0, inRate: 0, inPeak: 0, events: [], stSent: null };
     this.clients.add(c);
     return c;
   }
@@ -217,7 +226,8 @@ export class World {
       if (this.bots.length && this.people.length + this.bots.length >= this.opts.maxPlayers) this.removeEntity(this.bots.pop().e);
       const at = this.spawnPoint();
       p = this.spawnEntity(cleanName(h.name), false, at[0], at[1], true);
-      p.q = Array.from({ length: QUEUE }, () => ({ seq: 0, mx: 0, mz: 0, yaw: 0, buttons: 0 }));
+      p.q = Array.from({ length: QUEUE }, () => ({ seq: 0, mx: 0, mz: 0, yaw: 0, pitch: 0, buttons: 0, view: 0 }));
+      p.hints = []; p.gSent = gunFields({});
       const b = new Uint8Array(12); globalThis.crypto.getRandomValues(b);
       p.token = Array.from(b, v => v.toString(16).padStart(2, '0')).join('');
       this.tokens.set(p.token, p); this.people.push(p);
@@ -226,31 +236,48 @@ export class World {
     p.graceUntil = 0; p.qHead = 0; p.qCount = 0; p.lastQueued = -1; p.credit = CMDS_PER_TICK; p.ackSeq = 0; p.idle = 0;
     p.depthMin = 99; p.depthAt = this.tick; p.extra = 0;
     p.hSent = p.a.h ? copyHorse(p.hSent || makeHorse(), p.a.h) : null;      // the welcome carries the horse in full
+    copyGun(p.gSent, p.a); c.stSent = null;                                      // and the guns; the status goes in the first snapshot
     this.syncBots();
     this.send(c, encWelcome(this.w2, { id: p.id, tickRate: TICK_RATE, tick: this.tick, serverNow: this.serverNow(), dayMs: this.dayMs(), seed: this.opts.seed, token: p.token, horseId: p.horse ? p.horse.id : 0, actor: p.a }));
   }
   onInput(c, r) {
     const p = c.player; if (!p) return;
     let seq = r.u16();
-    c.viewDelay = (Math.floor(this.serverNow()) - r.u16()) & 65535;     // how far in the past this player sees the world, ms
+    const now = Math.floor(this.serverNow());
+    c.viewDelay = (now - r.u16()) & 65535;                       // how far in the past this player sees the world, ms
     const n = r.u8(); if (n > 12) throw new RangeError('too many inputs in one packet');
     for (let i = 0; i < n; i++, seq = (seq + 1) & 65535) {
-      const mx = r.i8(), mz = r.i8(), yaw = r.u16(), buttons = r.u8();
+      const mx = r.i8(), mz = r.i8(), yaw = r.u16(), pitch = r.i16(), buttons = r.u16();
       if (p.lastQueued >= 0 && seqDiff(seq, p.lastQueued) <= 0) continue;        // already have it
       if (p.qCount === QUEUE) { p.qHead = (p.qHead + 1) % QUEUE; p.qCount--; this.totals.inputsDropped++; }
       const q = p.q[(p.qHead + p.qCount) % QUEUE]; p.qCount++;
-      q.seq = seq; q.mx = mx < -127 ? -127 : mx; q.mz = mz < -127 ? -127 : mz; q.yaw = yaw; q.buttons = buttons & BTN_MASK;
+      q.seq = seq; q.mx = mx < -127 ? -127 : mx; q.mz = mz < -127 ? -127 : mz; q.yaw = yaw; q.pitch = pitch; q.buttons = buttons & BTN_MASK;
+      q.view = now - c.viewDelay - (n - 1 - i) * STEP_MS;       // the moment of the world this input was made looking at
       p.lastQueued = seq;
     }
+    // who was under the sights of each shot in this packet, and when they were there (ms, low 16 bits)
+    const nh = r.u8(); if (nh > n) throw new RangeError('more hints than inputs');
+    for (let i = 0; i < nh; i++) {
+      const hs = r.u16(), target = r.u16(), ms = now - ((now - r.u16()) & 65535);
+      if (p.hints.length >= HINTS) p.hints.shift();
+      p.hints.push({ seq: hs, target, ms });
+    }
+  }
+  hintFor(p, seq) {
+    const H = p.hints;
+    for (let i = 0; i < H.length; i++) if (H[i].seq === seq) { const h = H[i]; H.splice(i, 1); return h; }
+    return null;
   }
 
   // ---- one tick
   step() {
     const t0 = this.now(), tick = ++this.tick, field = this.field, t = tick / TICK_RATE;
 
+    const now = this.serverNow();
     for (let i = 0; i < this.bots.length; i++) {
-      const b = this.bots[i]; b.think(t);
-      for (let k = 0; k < CMDS_PER_TICK; k++) stepActor(b.e.a, b.cmd, field);
+      const b = this.bots[i]; b.think(t, this);
+      for (let k = 0; k < CMDS_PER_TICK; k++) { stepActor(b.e.a, b.cmd, field); if (b.e.a.fired) this.combat.fire(b.e, now, null); }
+      b.e.aimYaw = b.cmd.yaw;
     }
     let expired = null;
     for (let i = 0; i < this.people.length; i++) {
@@ -276,12 +303,18 @@ export class World {
       if (tick - p.depthAt >= DRAIN_TICKS) { if (p.depthMin >= CMDS_PER_TICK) p.extra = 1; p.depthMin = 99; p.depthAt = tick; }
       if (n === 0) { if (++p.idle > 10) for (let k = 0; k < CMDS_PER_TICK; k++) stepActor(p.a, NEUTRAL, field); continue; }
       p.idle = 0;
-      while (n--) { const q = p.q[p.qHead]; p.qHead = (p.qHead + 1) % QUEUE; p.qCount--; stepActor(p.a, q, field); p.ackSeq = q.seq; }
+      while (n--) {
+        const q = p.q[p.qHead]; p.qHead = (p.qHead + 1) % QUEUE; p.qCount--;
+        stepActor(p.a, q, field); p.ackSeq = q.seq; p.aimYaw = q.yaw;
+        if (p.a.fired) this.combat.fire(p, q.view, p.hints.length ? this.hintFor(p, q.seq) : null);
+      }
     }
     if (expired) { for (const p of expired) this.removeEntity(p); this.syncBots(); }
+    this.combat.tick();
+    if (this.law) this.law.tick(t);
 
     // what everyone else will be told about each body, and where it was (for rewinding later)
-    const hi = (tick % HIST) * 3;
+    const hi = (tick % HIST) * 5;
     for (let i = 0; i < this.list.length; i++) {
       const e = this.list[i], s = e.s;
       this.grid.move(e);
@@ -292,21 +325,25 @@ export class World {
         st = (s.ground ? ST_GROUND : 0) | (sp > HORSE.canter + 1.5 ? ST_SPRINT : 0) | (sp > 0.3 ? ST_MOVE : 0);
       } else {
         const a = e.a;
-        if (a.riding) st = ST_RIDING | ST_GROUND;                 // in the saddle: drawn on the horse, so nothing of their own to send
+        if (a.riding) { st = ST_RIDING | ST_GROUND; if (a.aimT > 0) qyaw = qYaw(e.yaw = (e.aimYaw / 65536) * TAU); }   // drawn on the horse: only which way they aim is their own
         else {
           const sp2 = s.vx * s.vx + s.vz * s.vz;
-          if (sp2 > 0.16) e.yaw = yawOf(s.vx, s.vz);
+          if (a.aimT > 0) e.yaw = (e.aimYaw / 65536) * TAU; else if (sp2 > 0.16 && !a.dead) e.yaw = yawOf(s.vx, s.vz);   // aiming, they face the way they aim
           qx = qPos(s.x); qy = qY(s.y); qz = qPos(s.z); qyaw = qYaw(e.yaw);
           st = (s.ground ? ST_GROUND : 0) | (sp2 > 30 ? ST_SPRINT : 0) | (sp2 > 0.09 ? ST_MOVE : 0);
         }
         if (a.whT > WHISTLE_HEARD) st |= ST_WHISTLE;
+        const L = e.law, b = e.bot;
+        e.gear = (a.swap ? 0 : a.slot) | (a.aimT > 0 ? GR_AIM : 0) | (a.rel > 0 ? GR_RELOAD : 0) | (a.gfl & GF.HANDS ? GR_HANDS : 0) | (a.dead ? GR_DEAD : 0) |
+          (b && b.witness ? GR_WITNESS : 0) | (L && L.wanted ? GR_WANTED : 0);
       }
       if (qx !== e.qx || qy !== e.qy || qz !== e.qz || qyaw !== e.qyaw || st !== e.st) {
         if (e.still >= 2) { e.restAt = e.lastChange; e.moveStart = tick; }
         e.still = 0; e.lastChange = tick;
         e.qx = qx; e.qy = qy; e.qz = qz; e.qyaw = qyaw; e.st = st;
       } else e.still++;
-      const h = e.hist; h[hi] = s.x; h[hi + 1] = s.y; h[hi + 2] = s.z;
+      const h = e.hist; h[hi] = s.x; h[hi + 1] = s.y; h[hi + 2] = s.z; h[hi + 3] = e.yaw;
+      h[hi + 4] = e.a ? (e.a.riding ? HF.RIDING : 0) | (e.a.dead ? HF.DEAD : 0) : 0;
     }
 
     for (const c of this.clients) if (c.player) this.sendSnapshot(c, tick);
@@ -329,7 +366,7 @@ export class World {
       const e = tmp[i]; if (e === me || e === me.horse) continue;                // a player's own horse comes with their own state
       const dx = e.s.x - s.x, dz = e.s.z - s.z, d2 = dx * dx + dz * dz, rec = c.view.get(e.id);
       if (rec) { if (d2 <= LEAVE2) rec.mark = mark; }
-      else if (d2 <= ENTER2) c.view.set(e.id, { e, known: false, qx: 0, qy: 0, qz: 0, yaw: 0, st: 0, prio: 1, sent: 0, sort: 0, mark });
+      else if (d2 <= ENTER2) c.view.set(e.id, { e, known: false, qx: 0, qy: 0, qz: 0, yaw: 0, st: 0, gear: 0, prio: 1, sent: 0, sort: 0, mark });
     }
     for (const [id, rec] of c.view) if (rec.mark !== mark) { c.view.delete(id); if (rec.known) c.gone.push(id); }
   }
@@ -339,12 +376,22 @@ export class World {
     if (c.conn.buffered > 65536) { this.totals.snapshotsSkipped++; return; }   // the socket is backed up: do not pile on
     const p = c.player, s = p.s, w = this.w, B = SNAPSHOT_BUDGET, h = p.a.h;
     // the horse goes along whenever anything about it has changed since this player was last told
-    const withHorse = !!h && !sameHorse(h, p.hSent);
+    const withHorse = !!h && !sameHorse(h, p.hSent), withGun = !sameGun(p.a, p.gSent);
     if (withHorse) copyHorse(p.hSent, h);
-    writeSnapshotHead(w, tick, p.ackSeq, p.a, withHorse);
+    if (withGun) copyGun(p.gSent, p.a);
+    writeSnapshotHead(w, tick, p.ackSeq, p.a, withHorse, withGun);
     if (c.fresh || (tick + p.id) % 5 === 0) { this.refreshView(c); c.fresh = false; }
-
+    // what only the server decides about this player, if it has changed
+    const so = this.statusOf(p, this.stScratch);
+    if (!c.stSent || !sameStatus(so, c.stSent)) { w.u8(1); writeStatus(w, so); c.stSent = Object.assign(c.stSent || makeStatus(), so); } else w.u8(0);
+    // what happened that this player could see: oldest first, as many as fit in a third of the budget
     let at = w.o, n = 0; w.u8(0);
+    const evs = c.events, lim = w.o + Math.floor((B - w.o) / 3);
+    while (n < evs.length && n < 255 && w.o + EV_SIZE[evs[n].type] <= lim) { writeEvent(w, evs[n]); n++; }
+    if (n) { this.totals.eventsSent += n; evs.splice(0, n); w.setU8(at, n); }
+    if (evs.length > 24) { this.totals.eventsDropped += evs.length - 24; evs.splice(0, evs.length - 24); }
+
+    at = w.o; n = 0; w.u8(0);
     const gone = c.gone;
     while (n < gone.length && n < 255 && w.o + 2 <= B - 2) { w.u16(gone[n]); n++; }
     if (n) { gone.splice(0, n); w.setU8(at, n); }
@@ -358,7 +405,7 @@ export class World {
       if (rec.prio > 4) rec.prio = 4;
       if (rec.prio < 1) continue;
       if (!rec.known) { rec.sort = 100 - d2 * 1e-4; cand.push(rec); fresh++; }
-      else if (e.qx !== rec.qx || e.qz !== rec.qz || e.qy !== rec.qy || e.qyaw !== rec.yaw || e.st !== rec.st) { rec.sort = rec.prio; cand.push(rec); }
+      else if (e.qx !== rec.qx || e.qz !== rec.qz || e.qy !== rec.qy || e.qyaw !== rec.yaw || e.st !== rec.st || e.gear !== rec.gear) { rec.sort = e.gear !== rec.gear ? rec.prio + 2 : rec.prio; cand.push(rec); }
     }
     if (cand.length > 1) cand.sort(byPrio);
 
@@ -370,7 +417,7 @@ export class World {
         const rec = cand[i]; if (rec.known) break;
         const e = rec.e; if (n === 255 || w.o + spawnSize(e) > limit) break;
         writeSpawn(w, e);
-        rec.known = true; rec.qx = e.qx; rec.qy = e.qy; rec.qz = e.qz; rec.yaw = e.qyaw; rec.st = e.st; rec.prio = 0; rec.sent = tick; rec.sort = -1; n++;
+        rec.known = true; rec.qx = e.qx; rec.qy = e.qy; rec.qz = e.qz; rec.yaw = e.qyaw; rec.st = e.st; rec.gear = e.gear; rec.prio = 0; rec.sent = tick; rec.sort = -1; n++;
       }
       w.setU8(at, n);
     }
@@ -380,7 +427,7 @@ export class World {
       const rec = cand[i]; if (!rec.known || rec.sort < 0) continue;
       if (n === 255 || w.o + UPDATE_MAX > B) break;
       const e = rec.e, dx = e.qx - rec.qx, dy = e.qy - rec.qy, dz = e.qz - rec.qz;
-      let mask = (dx || dy || dz ? UM.POS : 0) | (e.qyaw !== rec.yaw ? UM.YAW : 0) | (e.st !== rec.st ? UM.STATE : 0), hold = 0;
+      let mask = (dx || dy || dz ? UM.POS : 0) | (e.qyaw !== rec.yaw ? UM.YAW : 0) | (e.st !== rec.st ? UM.STATE : 0) | (e.gear !== rec.gear ? UM.GEAR : 0), hold = 0;
       // If this body stood still since before the last thing this player heard about it, say how long ago it set
       // off, so their copy does not start drifting before the real one moved.
       if (rec.sent >= e.restAt && rec.sent < e.moveStart - 1) { hold = Math.min(255, tick - (e.moveStart - 1)); if (hold > 0) mask |= UM.HOLD; }
@@ -389,7 +436,8 @@ export class World {
       if (mask & UM.POS) { w.vari(dx); w.vari(dz); w.vari(dy); }
       if (mask & UM.YAW) w.u8(e.qyaw);
       if (mask & UM.STATE) w.u8(e.st);
-      rec.qx = e.qx; rec.qy = e.qy; rec.qz = e.qz; rec.yaw = e.qyaw; rec.st = e.st; rec.prio = 0; rec.sent = tick; n++;
+      if (mask & UM.GEAR) w.u8(e.gear);
+      rec.qx = e.qx; rec.qy = e.qy; rec.qz = e.qz; rec.yaw = e.qyaw; rec.st = e.st; rec.gear = e.gear; rec.prio = 0; rec.sent = tick; n++;
     }
     if (n) w.setU8(at, n);
 
@@ -398,14 +446,26 @@ export class World {
     this.send(c, w.bytes());
   }
 
-  // ---- where a body was at an earlier tick (fractions allowed). Used for lag compensation from Phase 4.
+  // ---- where a body was at an earlier tick (fractions allowed): what lag compensation rewinds to
   positionAt(e, tick, out) {
     const newest = this.tick, oldest = newest - (HIST - 1);
     const t = tick > newest ? newest : tick < oldest ? oldest : tick, a = Math.floor(t), f = t - a;
-    const h = e.hist, i = (((a % HIST) + HIST) % HIST) * 3, j = ((((a + 1) % HIST) + HIST) % HIST) * 3;
+    const h = e.hist, i = (((a % HIST) + HIST) % HIST) * 5, j = ((((a + 1) % HIST) + HIST) % HIST) * 5;
     if (f <= 0 || a + 1 > newest) { out.x = h[i]; out.y = h[i + 1]; out.z = h[i + 2]; }
     else { out.x = h[i] + (h[j] - h[i]) * f; out.y = h[i + 1] + (h[j + 1] - h[i + 1]) * f; out.z = h[i + 2] + (h[j + 2] - h[i + 2]) * f; }
     return out;
+  }
+  // a body was put somewhere new by the server (getting up again, jail): nothing to rewind to between here and there
+  moved(e) { const s = e.s, h = e.hist; for (let i = 0; i < HIST; i++) { const o = i * 5; h[o] = s.x; h[o + 1] = s.y; h[o + 2] = s.z; } }
+  // what a player is told about themselves that only the server decides
+  statusOf(p, o) {
+    const a = p.a, L = p.law, tick = this.tick;
+    o.hp = Math.ceil(p.hp); o.flags = (a.dead ? SS.DEAD : 0) | (a.jail ? SS.JAILED : 0) | (L && L.seen ? SS.SEEN : 0) | (L && L.surrender ? SS.SURRENDER : 0);
+    o.wanted = L ? L.wanted : 0; o.bounty = L ? Math.min(65535, L.bounty) : 0;
+    o.sx = L && L.wanted ? Math.round(L.sx) : 0; o.sz = L && L.wanted ? Math.round(L.sz) : 0; o.sr = L && L.wanted ? Math.min(255, Math.round(L.sr / 4)) : 0;
+    o.timer = a.dead ? Math.max(0, Math.ceil((RESPAWN_TICKS - (tick - p.deadAt)) / TICK_RATE)) : a.jail && L ? Math.max(0, Math.min(255, Math.ceil((L.jailUntil - tick) / TICK_RATE))) : 0;
+    o.witnesses = L ? L.witnesses : 0;
+    return o;
   }
 
   // forget the peaks and timings so far, so a measurement can start clean
@@ -422,7 +482,7 @@ export class World {
       people: this.people.length, connected: n, bots: this.bots.length, entities: this.list.length, maxPlayers: this.opts.maxPlayers,
       tickMs: this.metrics.summary(),
       bytesPerSecond: { outAvg: n ? Math.round(out / n) : 0, outPeak: peak, inAvg: n ? Math.round(inn / n) : 0, inPeak },
-      biggestView: view, viewDelayMs: n ? Math.round(delay / n) : 0, totals: this.totals,
+      biggestView: view, viewDelayMs: n ? Math.round(delay / n) : 0, totals: this.totals, combat: this.combat.stats,
     };
   }
 }

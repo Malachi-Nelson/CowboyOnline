@@ -21,7 +21,8 @@ export function intervalFor(d) {
 export class Remote {
   constructor(id, kind, ef, name) {
     this.id = id; this.kind = kind; this.ef = ef; this.name = name;
-    this.qx = 0; this.qy = 0; this.qz = 0; this.qyaw = 0; this.st = 0;       // the latest the server said, as sent
+    this.qx = 0; this.qy = 0; this.qz = 0; this.qyaw = 0; this.st = 0; this.gear = 0;   // the latest the server said, as sent
+    this.aimYaw = 0; this.hurt = 0; this.hurtZone = 0; this.hurtYaw = 0;          // for drawing: which way they aim, how lately they were hit
     this.t = new Float64Array(N); this.p = new Float32Array(N * 4); this.m = new Uint8Array(N);
     this.head = -1; this.n = 0;
     this.x = 0; this.y = 0; this.z = 0; this.yaw = 0;                        // where it is drawn this frame

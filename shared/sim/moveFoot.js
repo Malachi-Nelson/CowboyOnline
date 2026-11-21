@@ -25,8 +25,9 @@ export const FOOT = {
   steep: 1.1,                            // ground rising faster than this (about 48 degrees) cannot be climbed
   wade: 0.3, swimAt: 1.25, swim: 1.7,    // water over the shins slows a body; at chest height it floats and swims
 };
-export const BTN = { SPRINT: 1, JUMP: 2, WALK: 4, USE: 8, WHISTLE: 16 };
-export const BTN_MASK = 31;
+// buttons, 16 bits on the wire. Bits 10 and 11 are not a button but the gun the player wants in hand (guns.js).
+export const BTN = { SPRINT: 1, JUMP: 2, WALK: 4, USE: 8, WHISTLE: 16, AIM: 32, FIRE: 64, RELOAD: 128, FOCUS: 256, HANDS: 512 };
+export const BTN_MASK = 0x0fff;
 export const FLAG = { GROUND: 1, JUMP_HELD: 2 };
 
 export function makeFoot(x = 0, y = 0, z = 0) { return { x, y, z, vx: 0, vy: 0, vz: 0, ground: 1, jumpHeld: 0 }; }

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { rig, rawClient } from './helpers.js';
 import { World } from '../server/src/core/world.js';
 import { Writer, Reader } from '../shared/net/codec.js';
-import { MSG, REJECT, UM, encHello, encInputHead, encCmd, decWelcome, readSnapshot, readSelf } from '../shared/net/messages.js';
+import { MSG, REJECT, UM, encHello, encInputHead, encCmd, encHints, decWelcome, readSnapshot, readSelf } from '../shared/net/messages.js';
 import { SNAPSHOT_BUDGET, HUB_X, HUB_Z, VIEW_ENTER, VIEW_LEAVE, PROTOCOL_VERSION, TICK_RATE, KIND_HORSE, KIND_PLAYER, ST_RIDING, ST_WHISTLE, DAY_MS } from '../shared/constants.js';
 import { FOOT, BTN } from '../shared/sim/moveFoot.js';
 import { HORSE } from '../shared/sim/moveHorse.js';
@@ -12,7 +12,7 @@ import { makeActor, AF } from '../shared/sim/actor.js';
 
 const w = new Writer(256);
 const hello = (name = 'Tester', token = '') => encHello(w, name, token);
-const inputs = (first, n, mx, mz, yaw, buttons) => { encInputHead(w, first, n, 0); for (let i = 0; i < n; i++) encCmd(w, mx, mz, yaw, buttons); return w.bytes(); };
+const inputs = (first, n, mx, mz, yaw, buttons, pitch = 0, hints = []) => { encInputHead(w, first, n, 0); for (let i = 0; i < n; i++) encCmd(w, mx, mz, yaw, pitch, buttons | (3 << 10)); encHints(w, hints); return w.bytes(); };
 const WEST = 16384;                          // a quarter turn left of north: straight down the main street
 const welcomeOf = raw => { const i = raw.types().indexOf(MSG.WELCOME); assert.ok(i >= 0, 'welcomed'); const a = makeActor(0, 0, 0, true), o = decWelcome(raw.reader(i), a); o.actor = a; return o; };
 // put a player in the middle of the main street, where there is a clear run west
@@ -127,10 +127,11 @@ test('a player nobody can see costs nothing, and a horse standing still costs no
   assert.ok(a.c.view.size <= 12, `few neighbours (${a.c.view.size})`);
   const median = sizes.sort((p, q) => p - q)[sizes.length >> 1];
   assert.ok(median <= 64, `median snapshot ${median} bytes`);
-  // alone on the street with their own horse at rest: the snapshot is the header and three empty counts
+  // alone on the street with their own horse at rest: the snapshot is the header, "no news" about their status, and
+  // four empty counts (events, gone, new, moved)
   const quiet = new World({ bots: 0, now: () => 0 }), q = rawClient(quiet); q.send(hello());
   for (let i = 0; i < 40; i++) quiet.step();
-  assert.equal(q.got.at(-1).length, 36);
+  assert.equal(q.got.at(-1).length, 38);
 });
 
 test('the horse is part of what a player is told about themselves, but only when it has changed', () => {

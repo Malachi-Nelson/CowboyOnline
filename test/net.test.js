@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Writer, Reader } from '../shared/net/codec.js';
-import { encInputHead, encCmd, encPing, encPong, encWelcome, decWelcome, writeSnapshotHead, writeSelf, readSelf, writeSpawn, spawnSize, SNAPSHOT_HEAD, SELF_SIZE, HORSE_SIZE } from '../shared/net/messages.js';
+import { encInputHead, encCmd, encHints, encPing, encPong, encWelcome, decWelcome, writeSnapshotHead, writeSelf, readSelf, writeSpawn, spawnSize, writeStatus, makeStatus, writeEvent, EV, EV_SIZE, SNAPSHOT_HEAD, SELF_SIZE, HORSE_SIZE, GUN_SIZE, STATUS_SIZE } from '../shared/net/messages.js';
 import { BAND_NEAR, BAND_MID, BAND_FAR, TICK_MS, SNAPSHOT_BUDGET, TICK_RATE, KIND_HORSE, KIND_PLAYER } from '../shared/constants.js';
 import { makeActor, stepActor, AF } from '../shared/sim/actor.js';
 import { BTN } from '../shared/sim/moveFoot.js';
@@ -13,15 +13,22 @@ import { LagTransport } from '../client/src/net/transport.js';
 
 test('message sizes are what the protocol document says', () => {
   const w = new Writer(256), a = makeActor(1, 2, 3, true);
-  encInputHead(w, 1, 3, 0); for (let i = 0; i < 3; i++) encCmd(w, 0, 127, 0, 1);
-  assert.equal(w.o, 21, 'three inputs in a packet');
+  encInputHead(w, 1, 3, 0); for (let i = 0; i < 3; i++) encCmd(w, 0, 127, 0, 0, 1); encHints(w, []);
+  assert.equal(w.o, 31, 'three inputs in a packet');
+  encInputHead(w, 1, 3, 0); for (let i = 0; i < 3; i++) encCmd(w, 0, 127, 0, 0, 1); encHints(w, [{ seq: 2, target: 9, ms: 1234 }]);
+  assert.equal(w.o, 37, 'and with a hint for a shot');
   assert.equal(encPing(w, 1).length, 9); assert.equal(encPong(w, 1, 2, 3).length, 21);
   writeSnapshotHead(w, 1, 2, a, false); assert.equal(w.o, SNAPSHOT_HEAD); assert.equal(SNAPSHOT_HEAD, 33);
   writeSnapshotHead(w, 1, 2, a, true); assert.equal(w.o, SNAPSHOT_HEAD + HORSE_SIZE); assert.equal(SELF_SIZE + HORSE_SIZE, 66);
-  const e = { id: 7, kind: KIND_PLAYER, ef: 0, name: 'Hattie', nameBytes: 6, qx: 1, qy: 2, qz: 3, qyaw: 4, st: 1 }; let at = w.o;
-  writeSpawn(w, e); assert.equal(w.o - at, spawnSize(e)); assert.equal(spawnSize(e), 21);
-  const h = { id: 8, kind: KIND_HORSE, ef: 0, name: '', nameBytes: 0, qx: 1, qy: 2, qz: 3, qyaw: 4, st: 1, owner: e }; at = w.o;
-  writeSpawn(w, h); assert.equal(w.o - at, spawnSize(h)); assert.equal(spawnSize(h), 17);
+  writeSnapshotHead(w, 1, 2, a, true, true); assert.equal(w.o, SNAPSHOT_HEAD + HORSE_SIZE + GUN_SIZE); assert.equal(GUN_SIZE, 24);
+  let at0 = w.o; writeStatus(w, makeStatus()); assert.equal(w.o - at0, STATUS_SIZE);
+  for (const [type, ev] of [[EV.SHOT, { id: 1, gun: 1, yaw: 2, pitch: -3, dist: 12.3, struck: 1 }], [EV.HIT, { id: 1, by: 2, zone: 2, dmg: 34, yaw: 9, hp: 66 }], [EV.DIE, { id: 1, by: 2, zone: 1 }], [EV.NOTE, { code: 1, value: 2 }]]) {
+    at0 = w.o; writeEvent(w, { type, ...ev }); assert.equal(w.o - at0, EV_SIZE[type], 'event ' + type);
+  }
+  const e = { id: 7, kind: KIND_PLAYER, ef: 0, name: 'Hattie', nameBytes: 6, qx: 1, qy: 2, qz: 3, qyaw: 4, st: 1, gear: 0 }; let at = w.o;
+  writeSpawn(w, e); assert.equal(w.o - at, spawnSize(e)); assert.equal(spawnSize(e), 22);
+  const h = { id: 8, kind: KIND_HORSE, ef: 0, name: '', nameBytes: 0, qx: 1, qy: 2, qz: 3, qyaw: 4, st: 1, gear: 0, owner: e }; at = w.o;
+  writeSpawn(w, h); assert.equal(w.o - at, spawnSize(h)); assert.equal(spawnSize(h), 18);
   assert.ok((SNAPSHOT_BUDGET + 4) * TICK_RATE <= 16000, 'a full snapshot every tick stays inside 16 KB/s');
 });
 
@@ -29,9 +36,10 @@ test('a player and their horse survive the trip over the wire exactly', () => {
   const f = flatField(), a = makeActor(2100, f.base, 2100, true), w = new Writer(256);
   a.h.x += 30; const cmd = { mx: 30, mz: 127, yaw: 9000, buttons: BTN.WHISTLE };
   for (let i = 0; i < 200; i++) { cmd.buttons = i === 0 ? BTN.WHISTLE : i === 150 ? BTN.USE : BTN.SPRINT; stepActor(a, cmd, f); }
-  w.reset(); writeSelf(w, a, true);
+  a.r1 = 7; a.m2 = 3; a.slot = 2; a.bloom = Math.fround(0.0125); a.focus = Math.fround(0.5); a.gfl = 5; a.jail = 1;
+  w.reset(); writeSelf(w, a, true, true);
   const b = makeActor(0, 0, 0, false), fl = readSelf(new Reader(w.bytes()), b);
-  assert.ok(fl & AF.HORSE_BLOCK); assert.deepEqual(b, a);
+  assert.ok(fl & AF.HORSE_BLOCK); assert.ok(fl & AF.GUN_BLOCK); assert.deepEqual(b, a);
   // without the horse block, the horse the reader already has is left alone
   const keep = b.h.x; a.f.x += 1; w.reset(); writeSelf(w, a, false); readSelf(new Reader(w.bytes()), b);
   assert.equal(b.f.x, a.f.x); assert.equal(b.h.x, keep);

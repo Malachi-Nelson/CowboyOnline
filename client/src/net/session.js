@@ -8,12 +8,14 @@
 //   Reconciliation. Every snapshot says "after your input number N this was your state". If that disagrees with
 //   what was predicted for N, the player is put where the server says and the inputs after N are run again.
 //   Interpolation. Everyone else is drawn a little in the past, sliding between the positions the server sent.
-import { SIM_DT, TICK_MS, PROTOCOL_VERSION, DAY_MS, KIND_HORSE, ST_RIDING, ST_WHISTLE } from '../../../shared/constants.js';
+import { SIM_DT, TICK_MS, PROTOCOL_VERSION, DAY_MS, KIND_HORSE, ST_RIDING, ST_WHISTLE, GR_DEAD } from '../../../shared/constants.js';
 import { Writer, Reader } from '../../../shared/net/codec.js';
-import { MSG, encHello, encInputHead, encCmd, encPing, decWelcome, readSnapshot, readSelf, dPos, dY, dYaw } from '../../../shared/net/messages.js';
+import { MSG, encHello, encInputHead, encCmd, encHints, encPing, decWelcome, readSnapshot, readSelf, readStatus, makeStatus, dPos, dY, dYaw } from '../../../shared/net/messages.js';
+import { rayPerson, rayHorse } from '../../../shared/world/raycast.js';
+import { PITCH_MAX } from '../../../shared/sim/guns.js';
 import { makeField } from '../../../shared/world/field.js';
 import { BTN_MASK } from '../../../shared/sim/moveFoot.js';
-import { makeActor, copyActor, stepActor, packActor, sameActor, ROW_F, ROW_B } from '../../../shared/sim/actor.js';
+import { makeActor, copyActor, stepActor, packActor, sameActor, ROW_F, ROW_B, ROW_T } from '../../../shared/sim/actor.js';
 import { seqDiff, yawOf } from '../../../shared/math.js';
 import { Remote, intervalFor, isMoving } from './interp.js';
 
@@ -48,10 +50,12 @@ export class Session {
     this.x = 0; this.y = 0; this.z = 0;
     this.pH = { x: 0, y: 0, z: 0, hx: 0, hz: -1 }; this.oH = { x: 0, y: 0, z: 0 };
     this.horse = { x: 0, y: 0, z: 0, yaw: 0, sp: 0 };          // the player's own horse as drawn; valid while a.h exists
-    this.cmd = { mx: 0, mz: 0, yaw: 0, buttons: 0 };
+    this.cmd = { mx: 0, mz: 0, yaw: 0, pitch: 0, buttons: 0 };
     this.seq = 1; this.ack = 0; this.batch = 0; this.acc = 0; this.last = 0;
-    this.cMx = new Int8Array(RING); this.cMz = new Int8Array(RING); this.cYaw = new Uint16Array(RING); this.cBtn = new Uint8Array(RING);
-    this.pF = new Float32Array(RING * ROW_F); this.pB = new Uint8Array(RING * ROW_B); this.pT = new Uint16Array(RING);
+    this.cMx = new Int8Array(RING); this.cMz = new Int8Array(RING); this.cYaw = new Uint16Array(RING); this.cPitch = new Int16Array(RING); this.cBtn = new Uint16Array(RING);
+    this.pF = new Float32Array(RING * ROW_F); this.pB = new Uint8Array(RING * ROW_B); this.pT = new Uint16Array(RING * ROW_T);
+    this.hints = []; this.pz = { zone: 0 };
+    this.status = makeStatus();                                // what the server alone decides: health, the law
 
     // everyone else
     this.ents = new Map(); this.horseOf = new Map(); this.tick = 0;
@@ -62,25 +66,28 @@ export class Session {
 
     this.stats = { bytesIn: 0, bytesOut: 0, snapshots: 0, inputs: 0, corrections: 0, errLast: 0, errMax: 0, errN: 0, errs: new Float32Array(8192), errHist: new Uint32Array(6), unknown: 0, lateFrames: 0, entFrames: 0, snapMax: 0 };
     this.onwelcome = null; this.onclose = null; this.onspawn = null; this.ondespawn = null; this.onself = null; this.onwhistle = null;
+    this.onshot = null; this.onevent = null; this.onstatus = null;
 
     this.snap = {
       self: (tick, ack, r) => this.reconcile(tick, ack, r),
+      status: r => { readStatus(r, this.status); if (this.onstatus) this.onstatus(this.status); },
+      event: (tick, ev) => { if (this.onevent) this.onevent(ev, tick); },
       despawn: id => {
         const e = this.ents.get(id); if (!e) return;
         this.ents.delete(id); if (e.kind === KIND_HORSE && this.horseOf.get(e.owner) === e) this.horseOf.delete(e.owner);
         if (this.ondespawn) this.ondespawn(e);
       },
-      spawn: (tick, id, kind, ef, name, qx, qy, qz, yaw, st, owner) => {
+      spawn: (tick, id, kind, ef, name, qx, qy, qz, yaw, st, owner, gear) => {
         let e = this.ents.get(id);
         if (e && this.ondespawn) this.ondespawn(e);
         e = new Remote(id, kind, ef, name); e.owner = owner;
-        e.qx = qx; e.qy = qy; e.qz = qz; e.qyaw = yaw; e.st = st;
+        e.qx = qx; e.qy = qy; e.qz = qz; e.qyaw = yaw; e.st = st; e.gear = gear;
         e.push(tick * TICK_MS, dPos(qx), dY(qy), dPos(qz), dYaw(yaw), isMoving(st));
         e.sample(tick * TICK_MS);
         this.ents.set(id, e); if (kind === KIND_HORSE) this.horseOf.set(owner, e);
         if (this.onspawn) this.onspawn(e);
       },
-      update: (tick, id, mask, hold, dx, dy, dz, yaw, st) => {
+      update: (tick, id, mask, hold, dx, dy, dz, yaw, st, gear) => {
         const e = this.ents.get(id);
         if (!e) { this.stats.unknown++; return; }
         const t = tick * TICK_MS;
@@ -92,6 +99,7 @@ export class Session {
         if (hold) e.push(t - hold * TICK_MS, dPos(e.qx), dY(e.qy), dPos(e.qz), dYaw(e.qyaw), false);
         e.qx += dx; e.qy += dy; e.qz += dz; if (yaw >= 0) e.qyaw = yaw;
         if (st >= 0) { if ((st & ST_WHISTLE) && !(e.st & ST_WHISTLE) && this.onwhistle) this.onwhistle(e); e.st = st; }
+        if (gear >= 0) e.gear = gear;
         if (before > -Infinity) { const gap = t - (hold ? t - hold * TICK_MS : before); e.ival += ((gap > 600 ? 600 : gap) - e.ival) * 0.25; }
         e.push(t, dPos(e.qx), dY(e.qy), dPos(e.qz), dYaw(e.qyaw), isMoving(e.st));
       },
@@ -130,7 +138,7 @@ export class Session {
       const m = this.a.f, h = this.a.h, now = this.now();
       this.prevX = this.x = m.x; this.prevY = this.y = m.y; this.prevZ = this.z = m.z; this.ox = this.oy = this.oz = 0;
       if (h) { const p = this.pH; p.x = h.x; p.y = h.y; p.z = h.z; p.hx = h.hx; p.hz = h.hz; this.oH.x = this.oH.y = this.oH.z = 0; }
-      this.seq = 1; this.ack = 0; this.batch = 0; this.acc = 0; this.last = now; this.synced = false; this.tOff = o.tick * TICK_MS - now;
+      this.seq = 1; this.ack = 0; this.batch = 0; this.acc = 0; this.last = now; this.synced = false; this.tOff = o.tick * TICK_MS - now; this.hints.length = 0;
       this.remember(0);                                          // "after input 0": where the server put us
       this.ents.clear(); this.horseOf.clear();
       this.state = 'playing';
@@ -160,26 +168,26 @@ export class Session {
     st.errLast = err; if (err > st.errMax) st.errMax = err;
     st.errs[st.errN++ & 8191] = err;
     st.errHist[err < 1e-3 ? 0 : err < 0.01 ? 1 : err < 0.05 ? 2 : err < 0.1 ? 3 : err < 0.5 ? 4 : 5]++;
-    if (sameActor(srv, F, o, this.pB, i0 * ROW_B, this.pT, i0, EPS)) return;
+    if (sameActor(srv, F, o, this.pB, i0 * ROW_B, this.pT, i0 * ROW_T, EPS)) return;
     // The server disagrees. Take its word, then run again every input it has not seen yet.
     const bx = m.x, by = m.y, bz = m.z, h0 = a.h, hbx = h0 ? h0.x : 0, hby = h0 ? h0.y : 0, hbz = h0 ? h0.z : 0;
-    const c = this.cmd, keep = { mx: c.mx, mz: c.mz, yaw: c.yaw, buttons: c.buttons };
+    const c = this.cmd, keep = { mx: c.mx, mz: c.mz, yaw: c.yaw, pitch: c.pitch, buttons: c.buttons };
     copyActor(a, srv); this.remember(i0);                       // so that the same answer arriving twice is not a second surprise
     for (let q = (ack + 1) & 65535, n = pending; n > 0; n--, q = (q + 1) & 65535) {
       const i = q & (RING - 1);
       if (n === 1) this.keepPrev();
-      c.mx = this.cMx[i]; c.mz = this.cMz[i]; c.yaw = this.cYaw[i]; c.buttons = this.cBtn[i];
+      c.mx = this.cMx[i]; c.mz = this.cMz[i]; c.yaw = this.cYaw[i]; c.pitch = this.cPitch[i]; c.buttons = this.cBtn[i];
       stepActor(a, c, this.field); this.remember(i);
     }
     if (pending === 0) this.keepPrev();
-    c.mx = keep.mx; c.mz = keep.mz; c.yaw = keep.yaw; c.buttons = keep.buttons;
+    c.mx = keep.mx; c.mz = keep.mz; c.yaw = keep.yaw; c.pitch = keep.pitch; c.buttons = keep.buttons;
     this.ox += bx - m.x; this.oy += by - m.y; this.oz += bz - m.z;
     if (this.ox * this.ox + this.oy * this.oy + this.oz * this.oz > SNAP * SNAP) this.ox = this.oy = this.oz = 0;
     const h = a.h, oh = this.oH;
     if (h && h0) { oh.x += hbx - h.x; oh.y += hby - h.y; oh.z += hbz - h.z; if (oh.x * oh.x + oh.y * oh.y + oh.z * oh.z > SNAP * SNAP) oh.x = oh.y = oh.z = 0; }
     st.corrections++;
   }
-  remember(i) { packActor(this.a, this.pF, i * ROW_F, this.pB, i * ROW_B, this.pT, i); }
+  remember(i) { packActor(this.a, this.pF, i * ROW_F, this.pB, i * ROW_B, this.pT, i * ROW_T); }
   // where things were a step ago, for drawing between steps
   keepPrev() {
     const m = this.a.f, h = this.a.h, p = this.pH;
@@ -195,9 +203,15 @@ export class Session {
     // exactly the numbers the wire carries, so both sides step with the same input
     c.mx = Math.max(-127, Math.min(127, Math.round(c.mx))) | 0; c.mz = Math.max(-127, Math.min(127, Math.round(c.mz))) | 0;
     c.yaw = Math.round(c.yaw) & 65535; c.buttons &= BTN_MASK;
-    this.cMx[i] = c.mx; this.cMz[i] = c.mz; this.cYaw[i] = c.yaw; this.cBtn[i] = c.buttons;
+    c.pitch = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, Math.round(c.pitch || 0))) | 0;
+    this.cMx[i] = c.mx; this.cMz[i] = c.mz; this.cYaw[i] = c.yaw; this.cPitch[i] = c.pitch; this.cBtn[i] = c.buttons;
     this.keepPrev();
     stepActor(a, c, this.field); this.remember(i);
+    if (a.fired) {                                                // a shot, this very step: say who was under the sights, and show it
+      const t = this.aimedAt(a);
+      if (t && this.hints.length < PER_PACKET) this.hints.push({ seq, target: t.id, ms: Math.floor(this.now() + this.tOff - t.delay) });
+      if (this.onshot) this.onshot(a, seq, t);
+    }
     // a horse that was put somewhere new, or a body that got on or off one, did not travel there: do not draw the trip
     const h = a.h, p = this.pH;
     if (h) { const dx = h.x - p.x, dz = h.z - p.z; if (dx * dx + dz * dz > 25) { p.x = h.x; p.y = h.y; p.z = h.z; p.hx = h.hx; p.hz = h.hz; this.oH.x = this.oH.y = this.oH.z = 0; } }
@@ -205,9 +219,26 @@ export class Session {
     if (++this.batch === PER_PACKET) {
       const w = this.w, first = (seq - (PER_PACKET - 1)) & 65535;
       encInputHead(w, first, PER_PACKET, Math.floor(this.now() + this.tOff - this.nearDelay));
-      for (let k = 0; k < PER_PACKET; k++) { const j = (first + k) & (RING - 1); encCmd(w, this.cMx[j], this.cMz[j], this.cYaw[j], this.cBtn[j]); }
+      for (let k = 0; k < PER_PACKET; k++) { const j = (first + k) & (RING - 1); encCmd(w, this.cMx[j], this.cMz[j], this.cYaw[j], this.cPitch[j], this.cBtn[j]); }
+      encHints(w, this.hints); this.hints.length = 0;
       this.send(w.bytes()); this.batch = 0;
     }
+  }
+  // Who a shot from the player's own gun went into, among everyone as they are drawn right now; or, failing that,
+  // whoever it passed closest to within a metre and a half. The server judges the shot; this only tells it which
+  // moment of the past to judge that person at.
+  aimedAt(a) {
+    let best = null, bt = 400, near = null, nd = 2.25;
+    for (const e of this.ents.values()) {
+      if (e.kind !== KIND_HORSE && (e.gear & GR_DEAD)) continue;
+      const t = e.kind === KIND_HORSE ? rayHorse(a.ox, a.oy, a.oz, a.dx, a.dy, a.dz, e.x, e.y, e.z, e.yaw, bt) : rayPerson(a.ox, a.oy, a.oz, a.dx, a.dy, a.dz, e.x, e.y, e.z, (e.st & ST_RIDING) !== 0, bt, this.pz);
+      if (t < bt) { bt = t; best = e; continue; }
+      if (best || e.kind === KIND_HORSE) continue;
+      const px = e.x - a.ox, py = e.y + 1.2 - a.oy, pz = e.z - a.oz, along = px * a.dx + py * a.dy + pz * a.dz;
+      if (along < 0) continue;
+      const d2 = px * px + py * py + pz * pz - along * along; if (d2 < nd) { nd = d2; near = e; }
+    }
+    return best || near;
   }
 
   // where to draw the player and their horse, `f` of the way from the last step to this one
@@ -244,10 +275,11 @@ export class Session {
       e.sample(est - e.delay);
       st.entFrames++; if (e.late > 0 && isMoving(e.st)) st.lateFrames++;
     }
-    // riders go where their horses are
+    // riders go where their horses are (and keep their own heading as the way they aim)
     for (const e of this.ents.values()) {
-      if (e.kind === KIND_HORSE || !(e.st & ST_RIDING)) { e.mount = null; continue; }
+      if (e.kind === KIND_HORSE || !(e.st & ST_RIDING)) { e.mount = null; e.aimYaw = e.yaw; continue; }
       const h = e.mount = this.horseOf.get(e.id) || null;
+      e.aimYaw = e.yaw;
       if (h) { e.x = h.x; e.y = h.y; e.z = h.z; e.yaw = h.yaw; e.vx = h.vx; e.vz = h.vz; }
     }
     if (now >= this.nextPing) { this.send(encPing(this.w, now)); this.nextPing = now + (this.pings++ < 8 ? 250 : 1000); }
