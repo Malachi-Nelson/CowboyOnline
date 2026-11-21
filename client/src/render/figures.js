@@ -6,9 +6,10 @@
 import { THREE } from './three.js';
 import { ST_GROUND, ST_RIDING, ST_WHISTLE, EF_BOT, KIND_HORSE, BAND_NEAR, BAND_MID, BAND_FAR } from '../../../shared/constants.js';
 import { angTo } from '../../../shared/math.js';
+import { HORSE } from '../../../shared/sim/moveHorse.js';
 import { Builder, C, mix } from './build.js';
 
-const HIP = 0.86, SEAT = 1.6;
+const HIP = 0.86, SEAT = 1.6, GALLOPING = 10;   // a rider leans forward above this speed (m/s)
 const COATS = [0x7a5a3c, 0x5f6b4a, 0x8a7350, 0x4f5d6b, 0x6b4a3f, 0x86806a, 0x5a4b61, 0x70614a, 0x3e3a36, 0x9a8a6a];
 const HATS = [0x4a3a2a, 0x2e2622, 0x6b5a44, 0x8a7a62, 0x3a3430, 0x5a4636];
 // coat, then mane and tail
@@ -19,9 +20,11 @@ const GAITS = [
   { name: 'walk', top: 2.9, len: 1.75, offs: [0.25, 0.75, 0, 0.5], amp: 0.3, lift: 0.7, bob: 0.025, pitch: 0.01, nod: 0.07 },
   { name: 'trot', top: 5.8, len: 2.9, offs: [0, 0.5, 0.5, 0], amp: 0.42, lift: 1.0, bob: 0.06, pitch: 0.012, nod: 0.03 },
   { name: 'canter', top: 10.2, len: 3.6, offs: [0.38, 0.62, 0, 0.38], amp: 0.58, lift: 1.1, bob: 0.07, pitch: 0.07, nod: 0.12 },
-  { name: 'gallop', top: 99, len: 5.6, offs: [0.5, 0.6, 0, 0.1], amp: 0.76, lift: 1.25, bob: 0.08, pitch: 0.06, nod: 0.1 },
+  { name: 'gallop', top: 99, len: 0, offs: [0.5, 0.6, 0, 0.1], amp: 0.76, lift: 1.25, bob: 0.08, pitch: 0.06, nod: 0.1 },   // stride lengthens with speed: see strideOf
 ];
 const TAU = Math.PI * 2;
+// metres a stride: a galloping horse covers more ground with each stride as it goes faster, about 6.8 m at full speed
+const strideOf = (G, sp) => G.len || 4.4 + sp * 0.14;
 
 function parts() {
   const white = [1, 1, 1], P = {};
@@ -102,7 +105,14 @@ export function createFigures(scene, field, maxPeople = 110, maxHorses = 64) {
   // ---- a horse. a: its animation state, carried from frame to frame. Leaves its body's matrix in a.M for the rider.
   function horse(a, x, y, z, yaw, speed, grounded, coat, dt, saddled) {
     if (nh >= maxHorses) return false;
-    if (!a.init) { a.init = true; a.phase = Math.abs(x * 0.37 + z * 0.11) % 1; a.yaw = yaw; a.sp = speed; a.offs = GAITS[0].offs.slice(); a.amp = 0; a.lift = 0; a.g = 0; a.pitch = 0; a.roll = 0; a.idle = 0; a.graze = 0; a.tail = 0; a.th = [0, 0, 0, 0]; a.M = new THREE.Matrix4(); a.wet = 0; }
+    if (!a.init) { a.init = true; a.phase = Math.abs(x * 0.37 + z * 0.11) % 1; a.yaw = yaw; a.sp = speed; a.offs = GAITS[0].offs.slice(); a.amp = 0; a.lift = 0; a.g = 0; a.pitch = 0; a.roll = 0; a.idle = 0; a.graze = 0; a.tail = 0; a.th = [0, 0, 0, 0]; a.M = new THREE.Matrix4(); a.wet = 0; a.py = y; a.vy = 0; a.air = 0; a.up = false; }
+    // off the ground (a jump, or over a drop): judged by height above whatever is underneath, so other people's horses,
+    // drawn a little in the past, leave the ground when their bodies do and not when the news that they jumped arrives
+    const under = Math.max(field.groundAt(x, z, y, HORSE.step), field.terrain.levelAt(x, z) - HORSE.swimAt), up = y - under > 0.15;
+    grounded = !up;
+    a.vy += (Math.max(-12, Math.min(12, dt > 0 ? (y - a.py) / dt : 0)) - a.vy) * (1 - Math.exp(-dt * 14)); a.py = y;
+    a.air += ((up ? 1 : 0) - a.air) * (1 - Math.exp(-dt * (up ? 16 : 10)));
+    const u = Math.max(-1, Math.min(1, a.vy / 6));                // +1 rising hard, -1 coming down hard
     const turn = angTo(a.yaw, yaw), k = 1 - Math.exp(-dt * 10);
     a.yaw += turn * k; a.sp += (speed - a.sp) * (1 - Math.exp(-dt * 6));
     const sp = Math.abs(a.sp), back = a.sp < -0.05;
@@ -111,14 +121,14 @@ export function createFigures(scene, field, maxPeople = 110, maxHorses = 64) {
     const G = GAITS[gi], e = 1 - Math.exp(-dt * 5), moving = sp > 0.12;
     for (let i = 0; i < 4; i++) { let d = G.offs[i] - a.offs[i]; d -= Math.round(d); a.offs[i] += d * e; a.offs[i] -= Math.floor(a.offs[i]); }
     a.amp += ((moving ? G.amp * Math.min(1, sp / 1.2) : 0) - a.amp) * e; a.lift += ((moving ? G.lift : 0) - a.lift) * e;
-    a.phase = (a.phase + (moving ? sp / G.len * dt * (back ? -1 : 1) : 0) + 10) % 1;
+    a.phase = (a.phase + (moving ? sp / strideOf(G, sp) * dt * (back ? -1 : 1) : 0) + 10) % 1;
     const ph = a.phase * TAU, two = Math.sin(ph * 2), one = Math.sin(ph);
     // over rough ground the body follows the slope between fore and hind hooves
     const t = field.terrain, fx = Math.sin(a.yaw), fz = Math.cos(a.yaw), hf = t.heightAt(x - fx * 0.75, z - fz * 0.75), hb = t.heightAt(x + fx * 0.75, z + fz * 0.75);
     const slope = grounded ? Math.atan2(hf - hb, 1.5) : 0;
-    a.pitch += (slope + (gi >= 2 ? one * G.pitch * a.amp / G.amp : 0) - a.pitch) * (1 - Math.exp(-dt * 12));
+    a.pitch += (slope + (gi >= 2 ? one * G.pitch * a.amp / G.amp : 0) * (1 - a.air) + a.air * u * 0.32 - a.pitch) * (1 - Math.exp(-dt * 12));
     a.roll += ((Math.max(-0.12, Math.min(0.12, turn * sp * 0.05))) - a.roll) * (1 - Math.exp(-dt * 6));
-    const bob = moving ? (gi === 1 ? Math.abs(two) : gi >= 2 ? (one + 1) * 0.5 : (two + 1) * 0.5) * G.bob * Math.min(1, sp / 2) : 0;
+    const bob = moving && !up ? (gi === 1 ? Math.abs(two) : gi >= 2 ? (one + 1) * 0.5 : (two + 1) * 0.5) * G.bob * Math.min(1, sp / 2) : 0;
     // idle: now and then the head goes down to graze
     a.idle = moving ? 0 : a.idle + dt; const graze = a.idle > 6 && ((a.idle / 9 + a.phase) % 1) > 0.45 ? 1 : 0; a.graze += (graze - a.graze) * (1 - Math.exp(-dt * 1.5));
     const water = t.levelAt(x, z) - y; a.wet = water;
@@ -128,7 +138,7 @@ export function createFigures(scene, field, maxPeople = 110, maxHorses = 64) {
     set(M.body, nh, R, hc);
     // neck and head: nod with the stride, stretch out at the gallop, drop to graze
     const nod = (gi >= 2 ? one : two) * G.nod * (a.amp / (G.amp || 1));
-    const neckA = 0.0 - nod * 0.6 + (gi === 3 ? 0.28 : gi === 2 ? 0.12 : 0) * (sp / 13) + a.graze * 0.95;
+    const neckA = 0.0 - nod * 0.6 * (1 - a.air) + (gi === 3 ? 0.28 : gi === 2 ? 0.12 : 0) * Math.min(1.1, sp / 15) + a.graze * 0.95 + a.air * (0.22 - 0.12 * u);
     T.copy(R).multiply(X.makeTranslation(0, 1.38, -0.86)).multiply(rotX(-neckA));
     set(M.neck, nh, T, hc); set(M.mane, nh, T, mc);
     T.multiply(X.makeTranslation(0, 0.84 * Math.cos(0.62), -0.84 * Math.sin(0.62))).multiply(rotX(-nod * 0.5 + a.graze * 0.5));
@@ -136,9 +146,14 @@ export function createFigures(scene, field, maxPeople = 110, maxHorses = 64) {
     // legs: the upper leg swings from the shoulder or hip; the lower one folds back as the hoof comes forward
     for (let i = 0; i < 4; i++) {
       const fore = i < 2, side = i % 2 ? 1 : -1, th = (a.phase + a.offs[i]) * TAU, swing = Math.sin(th) * a.amp, fold = Math.max(0, Math.cos(th)) * a.lift * a.amp;
-      T.copy(R).multiply(X.makeTranslation(side * 0.2, fore ? 1.02 : 1.05, fore ? -0.66 : 0.7)).multiply(rotX(swing + (fore ? 0 : 0.08)));
+      let ua = swing + (fore ? 0 : 0.08), la = fore ? -fold * 1.3 : -fold * 0.8 - 0.1;
+      if (a.air > 0.01) {                                         // in the air: forelegs tucked going up and reaching for the ground coming down; hind legs trailing, then gathered under
+        const ja = fore ? 0.6 + 0.5 * u : -0.7 * u + side * 0.04, jl = fore ? -(1.15 + 0.75 * u) : -(0.7 - 0.35 * u);
+        ua += (ja - ua) * a.air; la += (jl - la) * a.air;
+      }
+      T.copy(R).multiply(X.makeTranslation(side * 0.2, fore ? 1.02 : 1.05, fore ? -0.66 : 0.7)).multiply(rotX(ua));
       set(M.upper, nh * 4 + i, T, hc);
-      T.multiply(X.makeTranslation(0, -0.47, 0)).multiply(rotX(fore ? -fold * 1.3 : -fold * 0.8 - 0.1));
+      T.multiply(X.makeTranslation(0, -0.47, 0)).multiply(rotX(la));
       set(M.lower, nh * 4 + i, T, hc);
       // a hoof coming down makes a sound, at the front of its swing
       if (sound && moving && grounded) {
@@ -147,7 +162,13 @@ export function createFigures(scene, field, maxPeople = 110, maxHorses = 64) {
         a.th[i] = now;
       }
     }
-    a.tail += ((gi >= 2 ? 0.9 : 0.15 + Math.sin(a.idle * 1.7 + a.phase * 9) * 0.12) - a.tail) * (1 - Math.exp(-dt * 4));
+    a.tail += ((gi >= 2 || up ? 0.9 + a.air * 0.25 : 0.15 + Math.sin(a.idle * 1.7 + a.phase * 9) * 0.12) - a.tail) * (1 - Math.exp(-dt * 4));
+    // the push off and the landing are heard
+    if (sound && up !== a.up && (moving || !up)) {
+      const d = Math.hypot(x - earX, z - earZ), surf = water > 0.1 ? 2 : field.groundAt(x, z, y + 0.3) > t.heightAt(x, z) + 0.05 ? 1 : t.maskAt(x, z, 0) > 0.5 || y > 190 ? 3 : 0;
+      if (d < 80) { if (up) sound.hoof(3, d, surf); else sound.thud(d, surf, Math.min(1, -a.vy / 9)); }
+    }
+    a.up = up;
     T.copy(R).multiply(X.makeTranslation(0, 1.42, 0.98)).multiply(rotX(-a.tail)).multiply(rotZ(Math.sin(a.idle * 2.3) * 0.15 * (moving ? 0.3 : 1)));
     set(M.tail, nh, T, mc);
     if (saddled) set(M.saddle, nh, R); else { T.copy(R).multiply(X.makeScale(0.001, 0.001, 0.001)); set(M.saddle, nh, T); }
@@ -157,14 +178,15 @@ export function createFigures(scene, field, maxPeople = 110, maxHorses = 64) {
   }
 
   // ---- a person on foot, or in the saddle when `seat` is a horse's matrix
+  // seat: the horse's animation state (its body's matrix is seat.M), when the person is riding
   function person(a, x, y, z, yawWant, speedNow, grounded, coat, hat, dt, seat, whistle, gallop) {
     if (np >= maxPeople) return;
     if (!a.init) { a.init = true; a.phase = Math.abs(x * 7.3 + z * 3.1) % 6.28; a.yaw = yawWant; a.speed = speedNow; a.roll = 0; a.air = !grounded; a.wh = 0; a.ride = seat ? 1 : 0; }
     a.ride += ((seat ? 1 : 0) - a.ride) * (1 - Math.exp(-dt * 10));
     a.wh += ((whistle ? 1 : 0) - a.wh) * (1 - Math.exp(-dt * 12));
     if (seat) {
-      R.copy(seat).multiply(X.makeTranslation(0, SEAT + 0.05 - HIP, 0.02));
-      const lean = gallop ? 0.22 : 0.06;
+      R.copy(seat.M).multiply(X.makeTranslation(0, SEAT + 0.05 - HIP + seat.air * 0.08, 0.02 - seat.air * 0.08));
+      const lean = (gallop ? 0.22 : 0.06) + seat.air * 0.3;            // up out of the saddle and forward over the neck for a jump
       T.copy(R).multiply(X.makeTranslation(0, HIP, 0)).multiply(rotX(-lean));
       set(M.torso, np, T, coat);
       Hm.copy(T).multiply(X.makeTranslation(0, 0.62, 0)); set(M.head, np, Hm, 0xffffff, 0.92 + (coat % 7) * 0.02); set(M.hat, np, Hm, hat);
@@ -224,14 +246,14 @@ export function createFigures(scene, field, maxPeople = 110, maxHorses = 64) {
       const me = a.f;
       if (selfVisible) {
         const sp = Math.hypot(me.vx, me.vz);
-        person(self, session.x, session.y, session.z, sp > 0.4 ? Math.atan2(-me.vx, -me.vz) : (self.init ? self.yaw : 0), sp, !!me.ground, 0xd8c9a2, HATS[0], dt, a.riding && a.h ? selfHorse.M : null, a.whT > 60, a.riding && a.h && a.h.sp > 9.5);
+        person(self, session.x, session.y, session.z, sp > 0.4 ? Math.atan2(-me.vx, -me.vz) : (self.init ? self.yaw : 0), sp, !!me.ground, 0xd8c9a2, HATS[0], dt, a.riding && a.h ? selfHorse : null, a.whT > 60, a.riding && a.h && a.h.sp > GALLOPING);
       }
       for (const e of session.ents.values()) {
         if (e.kind === KIND_HORSE) continue;
         const an = e.anim || (e.anim = {}), d = Math.hypot(e.x - session.x, e.z - session.z);
         const coat = bandTint ? BANDS[d < BAND_NEAR ? 0 : d < BAND_MID ? 1 : d < BAND_FAR ? 2 : 3] : (e.ef & EF_BOT) ? COATS[e.id % COATS.length] : 0xb5483a;
-        const seat = (e.st & ST_RIDING) && e.mount && e.mount.anim && e.mount.anim.M ? e.mount.anim.M : null;
-        person(an, e.x, e.y, e.z, e.yaw, Math.hypot(e.vx, e.vz), (e.st & ST_GROUND) !== 0, coat, HATS[e.id % HATS.length], dt, seat, (e.st & ST_WHISTLE) !== 0, seat && e.mount && Math.hypot(e.mount.vx, e.mount.vz) > 9.5);
+        const seat = (e.st & ST_RIDING) && e.mount && e.mount.anim && e.mount.anim.M ? e.mount.anim : null;
+        person(an, e.x, e.y, e.z, e.yaw, Math.hypot(e.vx, e.vz), (e.st & ST_GROUND) !== 0, coat, HATS[e.id % HATS.length], dt, seat, (e.st & ST_WHISTLE) !== 0, seat && e.mount && Math.hypot(e.mount.vx, e.mount.vz) > GALLOPING);
       }
       M.torso.count = M.head.count = M.hat.count = np; M.arm.count = M.leg.count = np * 2;
       M.body.count = M.neck.count = M.mane.count = M.hhead.count = M.tail.count = M.saddle.count = nh; M.upper.count = M.lower.count = nh * 4;

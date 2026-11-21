@@ -207,21 +207,23 @@ test('slopes: a body goes up a hill slower, and not up a cliff at all', () => {
 });
 
 // ---- on horseback
-test('feel: a horse takes about 4 s to reach a gallop, and 2.5 s and 16 m to rein in', () => {
+test('feel: a horse takes about 4 s to reach a gallop of 17 m/s, and 2.5 s and 21 m to rein in', () => {
   const a = mounted(), h = a.h; let n = 0;
   while (h.sp < HORSE.gallop - 1e-3 && n < 1000) { stepActor(a, cmd(0, 127, NORTH, BTN.SPRINT), flat); n++; }
-  assert.ok(n * SIM_DT > 3.8 && n * SIM_DT < 4.2, `to a gallop in ${(n * SIM_DT).toFixed(2)} s`);
+  assert.equal(HORSE.gallop, 17);
+  assert.ok(n * SIM_DT > 4 && n * SIM_DT < 4.5, `to a gallop in ${(n * SIM_DT).toFixed(2)} s`);
   const z0 = h.z; n = 0;
   while (h.sp > 0 && n < 1000) { stepActor(a, cmd(0, -127, NORTH), flat); n++; }
+  const stop = Math.abs(z0 - h.z);
   assert.ok(n * SIM_DT > 2.4 && n * SIM_DT < 2.6, `stopped in ${(n * SIM_DT).toFixed(2)} s`);
-  assert.ok(Math.abs(z0 - h.z) > 15 && Math.abs(z0 - h.z) < 17.5, `in ${Math.abs(z0 - h.z).toFixed(1)} m`);
+  assert.ok(stop > 20 && stop < 22.5, `in ${stop.toFixed(1)} m`);
   for (let i = 0; i < 90; i++) stepActor(a, cmd(0, -127, NORTH), flat);
-  assert.ok(h.sp < -1 && h.z > z0 - 16.2 - 1, 'held back, it backs up');
+  assert.ok(h.sp < -1 && h.z > z0 - stop - 1, 'held back, it backs up');
   assert.equal(a.f.x, h.x); assert.equal(a.f.z, h.z);            // the rider goes where the horse goes
 });
 
-test('feel: a horse turns in 2 m at a walk, 8 m at a canter and 18 m at a gallop', () => {
-  for (const [name, btn, push, want] of [['walk', BTN.WALK, 52, 2], ['trot', BTN.WALK, 127, 4.4], ['canter', 0, 127, 8], ['gallop', BTN.SPRINT, 127, 18]]) {
+test('feel: a horse turns in 2 m at a walk, 9 m at a canter and 21 m at a gallop', () => {
+  for (const [name, btn, push, want] of [['walk', BTN.WALK, 52, 2], ['trot', BTN.WALK, 127, 4.4], ['canter', 0, 127, 8.8], ['gallop', BTN.SPRINT, 127, 21]]) {
     const a = mounted(), h = a.h;
     for (let i = 0; i < 400; i++) stepActor(a, cmd(0, push, NORTH, btn), flat);
     const sp = h.sp; let n = 0;
@@ -229,6 +231,82 @@ test('feel: a horse turns in 2 m at a walk, 8 m at a canter and 18 m at a gallop
     const radius = sp / ((Math.PI / 2) / (n * SIM_DT));
     assert.ok(Math.abs(radius - want) < want * 0.2, `${name}: ${sp.toFixed(1)} m/s, radius ${radius.toFixed(1)} m`);
   }
+});
+
+// ---- jumping
+const jumpFrom = (btn, push, side = 0) => {
+  const a = mounted(), h = a.h;
+  for (let i = 0; i < 400; i++) stepActor(a, cmd(0, push, NORTH, btn), flat);
+  const r = { y0: h.y, z0: h.z, sp0: h.sp, stam0: h.stam, hx: h.hx, hz: h.hz, top: 0, steps: 0, turned: 0 };
+  stepActor(a, cmd(side, push, NORTH, btn | BTN.JUMP), flat); r.steps++;
+  while (!h.ground && r.steps < 300) {
+    stepActor(a, cmd(side, push, NORTH, btn | BTN.JUMP), flat); r.steps++;     // the key still held, and the stick hard over
+    r.top = Math.max(r.top, h.y - r.y0); if (!h.ground && (h.hx !== r.hx || h.hz !== r.hz)) r.turned++;
+  }
+  r.len = r.z0 - h.z; r.after = h.sp; r.cost = r.stam0 - h.stam; r.a = a;
+  return r;
+};
+
+test('jump: about 1.2 m and 6 m from a canter, 12 m from a gallop; only a hop from a walk', () => {
+  const canter = jumpFrom(0, 127), gallop = jumpFrom(BTN.SPRINT, 127), walk = jumpFrom(BTN.WALK, 52), trot = jumpFrom(BTN.WALK, 127);
+  assert.ok(canter.top > 1.1 && canter.top < 1.3, `canter: ${canter.top.toFixed(2)} m high`);
+  assert.ok(canter.len > 5 && canter.len < 7, `canter: ${canter.len.toFixed(1)} m long`);
+  assert.ok(gallop.top > 1.1 && gallop.top < 1.3 && gallop.len > 10.5 && gallop.len < 13, `gallop: ${gallop.top.toFixed(2)} m high, ${gallop.len.toFixed(1)} m long`);
+  assert.ok(walk.top > 0.3 && walk.top < 0.6, `walk: a ${walk.top.toFixed(2)} m hop`);
+  assert.ok(trot.top > walk.top && trot.top < canter.top, 'a trot is between the two');
+  for (const r of [canter, gallop, walk]) {
+    assert.equal(r.turned, 0, 'no steering in the air');
+    assert.ok(r.after < r.sp0 && r.after > r.sp0 * 0.9, 'and it lands a little slower');
+  }
+  assert.ok(gallop.cost > HORSE.jumpCost * 0.9, `and it costs wind (${gallop.cost.toFixed(3)})`);
+});
+
+test('jump: holding the key jumps once; another press jumps again', () => {
+  const r = jumpFrom(0, 127), a = r.a, h = a.h;
+  for (let i = 0; i < 60; i++) { stepActor(a, cmd(0, 127, NORTH, BTN.JUMP), flat); assert.equal(h.ground, 1, 'held: no second jump'); }
+  stepActor(a, cmd(0, 127, NORTH, 0), flat); stepActor(a, cmd(0, 127, NORTH, BTN.JUMP), flat);
+  assert.equal(h.ground, 0, 'pressed again: up it goes');
+});
+
+test('jump: clears the 1.4 m wall of the pen if taken in the right place; without a jump the wall stops it', () => {
+  const at = (btn, takeoff) => {
+    const a = mounted(flat, HUB_X + 40, HUB_Z + 20), h = a.h; h.hx = -1; h.hz = 0; let done = false;
+    for (let i = 0; i < 900 && h.x > HUB_X - 34; i++) {
+      const j = takeoff !== null && !done && h.x - (HUB_X - 30) <= takeoff + HORSE.len + HORSE.r; if (j) done = true;
+      stepActor(a, cmd(0, 127, WEST, btn | (j ? BTN.JUMP : 0)), flat);
+    }
+    return h.x - HUB_X;
+  };
+  assert.ok(at(BTN.SPRINT, 3) < -31, 'galloping: over');
+  assert.ok(at(0, 1.5) < -31, 'cantering: over');
+  assert.ok(at(BTN.SPRINT, null) > -30 + HORSE.r, 'not jumping: stopped');
+  assert.ok(at(BTN.SPRINT, 12) > -30 + HORSE.r, 'jumping far too early: down in front of it, and stopped');
+});
+
+test('jump: not standing still, not swimming, not winded, and not up a cliff', () => {
+  const a = mounted(), h = a.h;
+  stepActor(a, cmd(0, 0, NORTH, BTN.JUMP), flat); assert.equal(h.ground, 1, 'standing: no');
+  for (let i = 0; i < 120; i++) stepActor(a, cmd(0, 127, NORTH, 0), flat);
+  h.winded = 1; stepActor(a, cmd(0, 127, NORTH, BTN.JUMP), flat); assert.equal(h.ground, 1, 'winded: no');
+  // swimming the river
+  const t = land.terrain, r = t.river, x = r.x[r.iHub], z = HUB_Z - 60, b = mounted(land, x - 45, z), hb = b.h; let tried = 0;
+  for (let i = 0; i < 60 * 60 && hb.x < x + 45; i++) {
+    const deep = t.levelAt(hb.x, hb.z) - hb.y > 1.4, j = deep && i % 2 === 0;
+    stepActor(b, cmd(0, 127, EAST, j ? BTN.JUMP : 0), land);
+    if (j) { tried++; assert.ok(hb.ground && hb.vy === 0, 'swimming: no'); }
+  }
+  assert.ok(tried > 50);
+  // on ground a little too steep to climb (40 to 45 degrees), jumping at it again and again
+  let worst = 0, spots = 0;
+  for (let fz = 300; fz < 1800 && spots < 12; fz += 23) for (let fx = 300; fx < 1500 && spots < 12; fx += 29) {
+    const gx = t.heightAt(fx + 0.5, fz) - t.heightAt(fx - 0.5, fz), gz = t.heightAt(fx, fz + 0.5) - t.heightAt(fx, fz - 0.5), g = Math.hypot(gx, gz);
+    if (g < 0.8 || g > 1) continue; spots++;
+    const c = mounted(land, fx, fz), y0 = c.h.y, uphill = Math.atan2(-gx, -gz);
+    for (let i = 0; i < 600; i++) stepActor(c, cmd(0, 127, uphill, BTN.SPRINT | (i % 20 === 0 ? BTN.JUMP : 0)), land);
+    worst = Math.max(worst, c.h.y - y0);
+  }
+  assert.ok(spots >= 8, 'found the slopes');
+  assert.ok(worst < 1, `climbed at most ${worst.toFixed(2)} m in ten seconds of jumping at a slope too steep to climb`);
 });
 
 test('feel: a gallop lasts about half a minute, then the horse must get its wind back', () => {
@@ -273,6 +351,16 @@ test('whistle: a horse 40 m off runs to its owner and stands beside them; E moun
   assert.ok(Math.abs(Math.hypot(a.f.x - h.x, a.f.z - h.z) - 1.15) < 0.2, 'down on the near side');
   for (let i = 0; i < 300; i++) stepActor(a, cmd(0, 0, 0, 0), flat);
   assert.equal(h.sp, 0, 'and the horse comes to rest by itself');
+});
+
+test('stepping down on the bridge leaves the rider on the deck, whichever edge the horse is near', () => {
+  const b = land.bridge, x = (b.x0 + b.x1) / 2;
+  for (const [z, hx] of [[b.z0 + 0.62, 1], [b.z1 - 0.62, 1], [b.z0 + 0.62, -1], [b.z1 - 0.62, -1]]) {      // alongside the rail
+    const a = makeActor(x, b.y, z, true); a.riding = 1; a.h.hx = hx; a.h.hz = 0;
+    stepActor(a, cmd(0, 0, 0, 0), land); stepActor(a, cmd(0, 0, 0, BTN.USE), land); assert.equal(a.riding, 0);
+    for (let i = 0; i < 60; i++) stepActor(a, cmd(0, 0, 0, 0), land);
+    assert.ok(Math.abs(a.f.y - b.y) < 0.3 && a.f.z > b.z0 && a.f.z < b.z1, `on the deck (${(a.f.y - b.y).toFixed(2)} m, z ${(a.f.z - b.z0).toFixed(2)} m from the north edge)`);
+  }
 });
 
 test('whistle: from too far to run it is brought in behind the view, with a clear run to its owner', () => {

@@ -208,7 +208,7 @@ test('sending inputs faster than time does not make a body faster, on foot or on
   onStreet(r.world, p, 60); p.a.h.x = p.s.x; p.a.h.z = p.s.z; p.a.h.sp = 0; p.a.h.hx = -1; p.a.h.hz = 0; p.a.riding = 1;
   const x1 = p.a.h.x;
   for (let i = 0; i < 100; i++) { a.send(inputs(seq, 6, 0, 127, WEST, BTN.SPRINT)); seq += 6; r.run(50); }
-  const dh = x1 - p.a.h.x, honest = 0.5 * HORSE.accel * 16 + HORSE.gallop * 1;                               // 4 s building speed, 1 s at a gallop
+  const tg = HORSE.gallop / HORSE.accel, dh = x1 - p.a.h.x, honest = 0.5 * HORSE.accel * tg * tg + HORSE.gallop * (5 - tg);   // building speed, then at a gallop
   assert.ok(dh > honest * 0.95 && dh < honest * 1.08 + HORSE.gallop * 0.5, `the horse covered ${dh.toFixed(1)} m; honest is ${honest.toFixed(1)} m`);
 });
 

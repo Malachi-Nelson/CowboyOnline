@@ -6,8 +6,8 @@ import { clamp, TAU } from '../../../shared/math.js';
 export function createControls(canvas, store) {
   const intent = { mx: 0, mz: 0, yaw: 0, pitch: -0.12, sprint: false, jump: false, walk: false, use: false, whistle: false, active: false, moved: false };
   const keys = new Set();
-  // a press of mount or whistle shorter than one input step (a quick tap) would never be seen; keep it until it is
-  const tapped = { use: false, whistle: false };
+  // a press of mount, whistle or jump shorter than one input step (a quick tap) would never be seen; keep it until it is
+  const tapped = { use: false, whistle: false, jump: false };
   let locked = false, dragging = false, lastX = 0, lastY = 0, lockedAt = 0;
   const cap = v => (v > 120 ? 120 : v < -120 ? -120 : v);
   const playing = () => store.state.mode === 'play';
@@ -21,7 +21,7 @@ export function createControls(canvas, store) {
     if (e.repeat) return;
     keys.add(e.code);
     if (e.code === 'KeyZ' && playing()) intent.walk = !intent.walk;
-    if (e.code === 'KeyE' || e.code === 'KeyF') tapped.use = true; else if (e.code === 'KeyH') tapped.whistle = true;
+    if (e.code === 'KeyE' || e.code === 'KeyF') tapped.use = true; else if (e.code === 'KeyH') tapped.whistle = true; else if (e.code === 'Space') tapped.jump = true;
   });
   addEventListener('keyup', e => keys.delete(e.code));
   addEventListener('blur', () => keys.clear());
@@ -68,7 +68,7 @@ export function createControls(canvas, store) {
     const set = v => e => { e.preventDefault(); on(v); b.classList.toggle('on', toggle ? toggle() : v); };
     b.addEventListener('touchstart', set(true), { passive: false }); b.addEventListener('touchend', set(false), { passive: false }); b.addEventListener('touchcancel', set(false), { passive: false });
   };
-  hold('tJump', v => { touch.jump = v; });
+  hold('tJump', v => { touch.jump = v; if (v) tapped.jump = true; });
   hold('tRun', v => { if (v) touch.sprint = !touch.sprint; }, () => touch.sprint);
   hold('tUse', v => { touch.use = v; if (v) tapped.use = true; });
   hold('tWhistle', v => { touch.whistle = v; if (v) tapped.whistle = true; });
@@ -85,10 +85,10 @@ export function createControls(canvas, store) {
     }
     intent.mx = mx; intent.mz = mz;
     intent.sprint = p && (keys.has('ShiftLeft') || keys.has('ShiftRight') || touch.sprint);
-    intent.jump = p && (keys.has('Space') || touch.jump);
+    intent.jump = p && (keys.has('Space') || touch.jump || tapped.jump);
     intent.use = p && (keys.has('KeyE') || keys.has('KeyF') || touch.use || tapped.use);
     intent.whistle = p && (keys.has('KeyH') || touch.whistle || tapped.whistle);
-    tapped.use = tapped.whistle = false;
+    tapped.use = tapped.whistle = tapped.jump = false;
     intent.active = mx !== 0 || mz !== 0;
     if (intent.active) intent.moved = true;
     return intent;

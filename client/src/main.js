@@ -175,18 +175,21 @@ function frame() {
   if (gap > 80) setTimeout(() => requestAnimationFrame(frame), 0); else requestAnimationFrame(frame);
   if (!session || session.state !== 'playing' || !field || building || !world) { view.render(fallbackCam); return; }
   session.frame(now);
+  if (holding) return;                                             // an automated picture is being taken of the last frame drawn
   const playing = store.state.mode === 'play', a = session.a, i = controls.intent, time = now / 1000;
   const riding = a.riding && a.h ? 1 : 0, speed = riding ? Math.abs(a.h.sp) : Math.hypot(a.f.vx, a.f.vz);
   // the light and the weather, from the world's clock
   const hour = forced.hour !== undefined ? forced.hour : session.hour(now), w = forced.weather || weatherAt(now + session.tOff, session.x, session.z, field.terrain, field.seed, wx);
   view.setTime(hour, w.mist, w.cloud);
-  if (photo) { camera.cam.position.set(photo[0], photo[1], photo[2]); camera.cam.lookAt(photo[3], photo[4], photo[5]); }
+  const pc = typeof photo === 'function' ? photo(session) : photo;
+  if (pc) { camera.cam.position.set(pc[0], pc[1], pc[2]); camera.cam.lookAt(pc[3], pc[4], pc[5]); }
   else if (playing) camera.follow(session.x, session.y, session.z, i.yaw, i.pitch, speed, dt, riding);
   else camera.circle(HUB_X - 30, field.base, HUB_Z, still ? 0 : dt);
   const eye = camera.cam.position, fx = playing && !photo ? session.x : eye.x, fz = playing && !photo ? session.z : eye.z;
   world.terrain.update(fx, fz, eye); world.trees.update(fx, fz, time); world.water.update(time, view.env, eye); world.towns.update(view.env); world.weather.update(w, camera.cam, time, view.env);
   figures.update(session, dt, store.state.bandTint, true, playing ? sound : null, view.env);
   view.render(camera.cam);
+  if (holdWhen && holdWhen(session)) { holding = true; holdWhen = null; }
   if (playing) {
     horseSounds();
     sound.ambience({ height: session.y, speed, water: Math.max(0, field.terrain.riverDist(session.x, session.z) - 22), rapids: false, rain: w.rain, storm: w.cloud * w.rain, day: view.env.day }, dt);
@@ -199,12 +202,13 @@ function frame() {
   }
 }
 const mapImageOf = () => (map ? map.image : null);
-let photo = null;                                                    // a fixed camera for automated pictures: [x, y, z, at x, at y, at z]
+let photo = null;                                                    // a fixed camera for automated pictures: [x, y, z, at x, at y, at z], or a function of the session giving one
+let holdWhen = null, holding = false;                                // and a moment to stop drawing at, so a picture can be taken of it
 const forced = {};                                                   // and a fixed hour or weather, for the same
 let touchRiding = -1;
 
 // a handle for automated checks, as HoodWar has with window.__pc
-globalThis.__ct = { store, controls, get frames() { return frames; }, get session() { return session; }, get local() { return local; }, get camera() { return camera; }, get world() { return world; }, get map() { return map; }, view, sound, photo(p) { photo = p || null; }, force(o) { Object.assign(forced, o); } };
+globalThis.__ct = { store, controls, get frames() { return frames; }, get session() { return session; }, get local() { return local; }, get camera() { return camera; }, get world() { return world; }, get map() { return map; }, view, sound, photo(p) { photo = p || null; }, force(o) { Object.assign(forced, o); }, hold(when) { holdWhen = when || null; holding = false; }, get holding() { return holding; } };
 
 size();
 connect(!hosted && preset ? preset : '');

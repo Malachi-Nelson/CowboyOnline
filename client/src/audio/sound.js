@@ -53,6 +53,15 @@ export function createSound() {
       else if (surface === 3) burst(k * 0.6, 'lowpass', 520 + Math.random() * 120, 0.5, 0.14);
       else { burst(k, 'lowpass', 190 + gait * 30 + Math.random() * 60, 1.2, 0.13); burst(k * 0.35, 'bandpass', 900 + Math.random() * 300, 1.5, 0.05); }
     },
+    // a horse coming down from a jump: all four hooves at once, heavier the further it fell
+    thud(dist, surface, hard = 0.7) {
+      const k = (0.34 + hard * 0.3) / (1 + dist * dist / 200);
+      if (surface === 2) { burst(k * 1.2, 'bandpass', 1100 + Math.random() * 600, 0.7, 0.4); return; }
+      burst(k, 'lowpass', 120 + Math.random() * 30, 1, 0.24); burst(k * 0.7, 'lowpass', 220, 1.2, 0.14, 0.045);
+      if (surface === 1) burst(k * 0.8, 'bandpass', 1150, 2.5, 0.12);
+      else if (surface === 3) burst(k * 0.5, 'lowpass', 600, 0.5, 0.2);
+      else burst(k * 0.3, 'bandpass', 800 + Math.random() * 300, 1.2, 0.09, 0.02);
+    },
     // two rising notes and a fall: a whistle for a horse. Others' whistles come from further off.
     whistle(dist = 0) {
       const g = 0.16 / (1 + dist * dist / 900);

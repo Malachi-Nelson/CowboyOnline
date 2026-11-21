@@ -35,7 +35,7 @@ export function stepActor(a, cmd, field) {
   }
   a.useHeld = use ? 1 : 0; a.whHeld = wh ? 1 : 0;
   if (a.riding) {
-    rideHorse(h, cmd, field);
+    rideHorse(h, cmd, field, (btn & BTN.JUMP) !== 0 && !f.jumpHeld);   // the jump key going down, not held
     f.x = h.x; f.y = h.y; f.z = h.z; f.vx = Math.fround(h.hx * h.sp); f.vy = h.vy; f.vz = Math.fround(h.hz * h.sp); f.ground = h.ground; f.jumpHeld = (btn & BTN.JUMP) ? 1 : 0;
   } else {
     stepFoot(f, cmd, field);

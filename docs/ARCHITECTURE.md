@@ -67,7 +67,14 @@ the same ground. Tests pin a handful of heights and a checksum of the forest.
   owner is looking, on dry and gentle ground with nothing built and no deep water between it and them. If it
   stops making progress (a river, a wall), it is put nearer again.
 - **Mounting** needs the horse within 2.6 m and slower than a trot. Stepping down puts the rider on the horse's
-  near side, or the far side if that is blocked, keeping some of its speed.
+  near side, or the far side if that is blocked (by a wall, a bridge rail, or a drop), keeping some of its speed.
+- **Jumping** (Space while riding) happens on the key going down, from the ground, going forward, with wind to
+  spare and out of deep water. From a canter or a gallop the horse leaves the ground at 7 m/s and rises about
+  1.2 m: anything whose top is below its hooves plus a step (a fence, a hitching rail, a trough, a low wall up
+  to about 1.4 m, taken in the right place) stops counting as an obstacle while it is over it. From a walk or a
+  trot it is a hop. In the air it holds its speed and heading. Landing costs a little speed, more after a long
+  drop or into a rise, so hopping up a hill is no quicker than running up it; a jump never carries a horse up a
+  bank, and it cannot take off from ground too steep to climb.
 - **Riding** steers like a horse, not a car: the stick says where to go as seen from the camera and the horse
   comes round to it at a rate that falls with speed, slowing first if asked to turn back on itself. Pulling
   straight back reins it in, then backs it up. Two circles, fore and hind, collide with the world.
@@ -77,10 +84,11 @@ horse turns and runs the moment the key goes down, and the server agrees to the 
 of the player's own state on the wire, sent in full precision whenever it changes. Everyone else sees it as an
 ordinary entity that names its owner, and draws the owner sitting on it.
 
-The feel numbers are constants at the top of `moveHorse.js`, pinned by tests: 4.0 s from standing to a gallop,
-2.5 s and 16 m to rein in, a turning circle of 1.7 m at a walk, 7.8 m at a canter and 17.4 m at a gallop,
-32 s of gallop before the horse is winded, a third of the speed lost on a 20 degree climb, nothing above 38
-degrees, and swimming at 2.4 m/s.
+The feel numbers are constants at the top of `moveHorse.js`, pinned by tests: gaits of 1.7, 4.2, 8.5 and
+17 m/s; 4.25 s from standing to a gallop, 2.5 s and 21 m to rein in, a turning radius of 1.7 m at a walk,
+8.6 m at a canter and 20.7 m at a gallop, about 32 s of gallop before the horse is winded, a third of the speed
+lost on a 20 degree climb, nothing above 38 degrees, swimming at 2.4 m/s, and a jump 1.17 m high, 5.8 m long
+from a canter and 11.6 m from a gallop, costing a twentieth of the horse's wind.
 
 ## Movement, and why client and server never disagree
 

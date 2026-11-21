@@ -2,14 +2,16 @@
 // rounded to 32-bit floats) so the rider's browser and the server always agree where it is.
 //
 // A horse is not a fast pair of legs. It has a heading and goes where it is pointed; it comes round in an arc
-// that widens with speed; it takes seconds to reach a gallop and seconds to stop. The numbers are the Phase 1
-// feel targets:
-//   gaits                          walk 1.7, trot 4.2, canter 7.5, gallop 13 m/s
-//   standing start to a gallop     about 4 s
-//   gallop to a stop, reined in    2.5 s and about 16 m
-//   turning circle                 2 m at a walk, 8 m at a canter, 18 m at a gallop
+// that widens with speed; it takes seconds to reach a gallop and seconds to stop. The numbers are the feel targets:
+//   gaits                          walk 1.7, trot 4.2, canter 8.5, gallop 17 m/s
+//   standing start to a gallop     about 4.25 s (a canter in about 2)
+//   gallop to a stop, reined in    2.5 s and about 21 m
+//   turning circle (radius)        2 m at a walk, 9 m at a canter, 21 m at a gallop
 //   a gallop lasts                 about 30 s, then the horse is winded and must get its breath back
 //   a 20 degree climb              costs a third of the speed
+//   a jump                         from a canter or a gallop it clears a fence or a hitching rail (about 1.3 m) if
+//                                  it takes off in the right place; from a walk or a trot it is a hop. It cannot steer
+//                                  in the air, it costs some wind, and a winded horse will not jump at all.
 import { SIM_DT, WORLD_SIZE } from '../constants.js';
 import { SIN16, COS16, sinSmall, cosSmall } from './trig.js';
 import { BTN, FOOT } from './moveFoot.js';
@@ -17,20 +19,22 @@ import { BTN, FOOT } from './moveFoot.js';
 export const HORSE = {
   r: 0.45, len: 0.75,                    // two circles, one this far ahead of the middle and one behind
   h: 1.65, step: 0.5, seat: 1.42,        // seat: how high the saddle is above the hooves
-  walk: 1.7, trot: 4.2, canter: 7.5, gallop: 13,
-  accel: 3.25, coast: 3, rein: 5.2, back: 1.4,
+  walk: 1.7, trot: 4.2, canter: 8.5, gallop: 17,
+  accel: 4, coast: 3, rein: 6.8, back: 1.4,
   gallopFor: 30, breath: 0.3,            // seconds of gallop in a fresh horse; how full it must be again before it will gallop
   uphill: 0.915, steep: 0.78,            // 38 degrees is as steep as a horse will climb
   wade: 0.6, swimAt: 1.45, swim: 2.4,
   gravity: 20,
+  jump: 7, jumpMin: 1, jumpCost: 0.05,   // take-off speed upward (m/s) from a canter or faster; slowest it will jump at; wind it costs
+  come: 14,                              // how fast it runs to its owner when whistled for from a distance
   reach: 2.6, mountSpeed: 3.5,           // how near, and how slow the horse must be, to get into the saddle
   far: 85, bringIn: 55, arrive: 2.4, comeFor: 30 * 60,   // whistle: beyond `far` the horse is brought in to `bringIn` first
 };
 export const HMODE = { IDLE: 0, COME: 1 };
 // how fast the heading can swing (rad/s) at a given speed: speed / rate is the turning circle's radius
-const TURN = [0, 2, 1.7, 1, 4.2, 0.98, 7.5, 0.94, 13, 0.72];
+const TURN = [0, 2, 1.7, 1, 4.2, 0.98, 8.5, 0.97, 13, 0.86, 17, 0.8];
 function turnRate(sp) {
-  if (sp >= 13) return 0.72;
+  if (sp >= 17) return 0.8;
   let i = 2; while (sp > TURN[i]) i += 2;
   return TURN[i - 1] + (TURN[i + 1] - TURN[i - 1]) * (sp - TURN[i - 2]) / (TURN[i] - TURN[i - 2]);
 }
@@ -99,11 +103,23 @@ function move(h, wx, wz, want, rein, gallop, field, slow = HORSE.coast) {
   const lim = WORLD_SIZE - 4;
   nx = nx < 4 ? 4 : nx > lim ? lim : nx; nz = nz < 4 ? 4 : nz > lim ? lim : nz;
 
-  let g = field.groundAt(nx, nz, h.y, K.step); const fl = T.levelAt(nx, nz) - K.swimAt;
+  let g = field.groundAt(nx, nz, h.y, K.step), fl = T.levelAt(nx, nz) - K.swimAt;
   if (fl > g) g = fl;
+  if (!h.ground && g - h.y > K.step) {                         // a jump does not carry a horse up a bank: it meets it and stops
+    nx = h.x; nz = h.z; sp = 0;
+    g = field.groundAt(nx, nz, h.y, K.step); fl = T.levelAt(nx, nz) - K.swimAt; if (fl > g) g = fl;
+  }
   h.x = nx; h.z = nz;
   if (h.ground) { if (h.y - g <= K.step + 0.4) { h.y = g; h.vy = 0; } else h.ground = 0; }
-  if (!h.ground) { h.vy -= K.gravity * dt; const ny = h.y + h.vy * dt; if (ny <= g) { h.y = g; h.vy = 0; h.ground = 1; } else h.y = ny; }
+  if (!h.ground) {
+    h.vy -= K.gravity * dt; const ny = h.y + h.vy * dt;
+    if (ny <= g) {                                                // down again: a jump costs a little speed, a long drop a lot,
+      const fall = -h.vy, rise = T.heightAt(nx + h.hx * 0.5, nz + h.hz * 0.5) - T.heightAt(nx - h.hx * 0.5, nz - h.hz * 0.5);
+      let k = fall > 8 ? 1 - (fall - 8) * 0.1 : 0.96;
+      if (rise > 0) k -= rise * 0.5;                              // and landing into a rise more, so hopping up a hill is no quicker than running up it
+      sp *= k < 0.3 ? 0.3 : k; h.y = g; h.vy = 0; h.ground = 1;
+    } else h.y = ny;
+  }
 
   const l = Math.sqrt(h.hx * h.hx + h.hz * h.hz), f = Math.fround;
   h.x = f(h.x); h.y = f(h.y); h.z = f(h.z); h.hx = f(h.hx / l); h.hz = f(h.hz / l); h.sp = f(sp); h.vy = f(h.vy); h.stam = f(h.stam);
@@ -111,8 +127,9 @@ function move(h, wx, wz, want, rein, gallop, field, slow = HORSE.coast) {
 
 // With a rider: the stick says where to go, as seen from the camera, and the horse comes round to it. Pulling
 // straight back reins it in, and backs it up once it has stopped.
-export function rideHorse(h, cmd, field) {
+export function rideHorse(h, cmd, field, jump = false) {
   const K = HORSE, btn = cmd.buttons, fwd = cmd.mz / 127, str = cmd.mx / 127, ml = Math.sqrt(fwd * fwd + str * str);
+  if (jump) leap(h, field);
   if (ml <= 0.05) { move(h, 0, 0, 0, false, false, field); return; }
   const sn = SIN16[cmd.yaw & 65535], cs = COS16[cmd.yaw & 65535], k = 1 / ml, wx = (-sn * fwd + cs * str) * k, wz = (-cs * fwd - sn * str) * k;
   if (fwd < -0.5 && h.hx * wx + h.hz * wz < -0.7) {
@@ -121,6 +138,21 @@ export function rideHorse(h, cmd, field) {
   }
   const gallop = (btn & BTN.SPRINT) !== 0 && !h.winded;
   move(h, wx, wz, (gallop ? K.gallop : (btn & BTN.WALK) ? K.trot : K.canter) * (ml < 1 ? ml : 1), false, gallop, field);
+}
+
+// A jump: only from the ground, going forward at a walk or faster, out of deep water, and with wind to spare. The
+// faster it is going the higher it gets, up to a full jump from a canter. In the air it holds its speed and heading
+// (move() only steers and drives on the ground), and the low things it passes over (anything whose top is under its
+// hooves plus a step) do not stop it.
+function leap(h, field) {
+  const K = HORSE, T = field.terrain, x = h.x, z = h.z;
+  if (!h.ground || h.winded || h.stam < K.jumpCost || h.sp < K.jumpMin || T.levelAt(x, z) - h.y > K.wade) return;
+  if (h.y - T.heightAt(x, z) < 0.06) {                         // nor from ground too steep to climb, so it cannot hop up a cliff
+    const gx = T.heightAt(x + 0.5, z) - T.heightAt(x - 0.5, z), gz = T.heightAt(x, z + 0.5) - T.heightAt(x, z - 0.5);
+    if (gx * gx + gz * gz > K.steep * K.steep) return;
+  }
+  const k = h.sp >= K.canter ? 1 : 0.55 + 0.45 * h.sp / K.canter;
+  h.vy = Math.fround(K.jump * k); h.ground = 0; h.stam = Math.fround(h.stam - K.jumpCost);
 }
 
 // Put the horse somewhere near its owner, out of sight if there is such a place: first choice is straight behind
@@ -162,7 +194,7 @@ export function freeHorse(h, f, cmd, field) {
         bringIn(h, f, cmd.yaw, stuck ? 16 : K.bringIn, field);
         dx = f.x - h.x; dz = f.z - h.z; d = Math.sqrt(dx * dx + dz * dz); h.st = 0; h.sd = Math.fround(d);
       }
-      if (d > 0.01) { const want = d > 24 ? 12 : d > 9.5 ? K.canter : d > 4.5 ? K.trot : K.walk; move(h, dx / d, dz / d, want, false, false, field, K.rein); return; }
+      if (d > 0.01) { const want = d > 30 ? K.come : d > 9.5 ? K.canter : d > 4.5 ? K.trot : K.walk; move(h, dx / d, dz / d, want, false, false, field, K.rein); return; }
     }
   }
   if (h.sp !== 0 || !h.ground || h.stam < 1) move(h, 0, 0, 0, false, false, field);
@@ -170,11 +202,17 @@ export function freeHorse(h, f, cmd, field) {
 
 export const horseNear = (h, f) => { const dx = f.x - h.x, dz = f.z - h.z, dy = f.y - h.y; return dx * dx + dz * dz < HORSE.reach * HORSE.reach && dy < 1.6 && dy > -1.6; };
 
-// Where a rider stepping down lands: the horse's left if there is room, else its right, else where it stands.
+// Where a rider stepping down lands: the horse's left if there is room, else its right, else where it stands. Room
+// means nothing solid there or in between (a bridge rail, a wall), and ground at about the horse's own height (not
+// the drop off the side of a bridge or a bank).
 export function dismountSpot(h, field, out) {
   for (let side = 1; side >= -1; side -= 2) {
-    const x = h.x + h.hz * 1.15 * side, z = h.z - h.hx * 1.15 * side;
-    if (!field.boxes.pushOut(x, z, FOOT.r, h.y + FOOT.step, h.y + FOOT.h) && !field.trees.pushOut(x, z, FOOT.r)) { out.x = x; out.z = z; return out; }
+    const sx = h.hz * side, sz = -h.hx * side, x = h.x + sx * 1.15, z = h.z + sz * 1.15;
+    if (field.boxes.pushOut(x, z, FOOT.r, h.y + FOOT.step, h.y + FOOT.h) || field.trees.pushOut(x, z, FOOT.r)) continue;
+    if (field.boxes.ray(h.x, h.y + 0.6, h.z, sx, 0, sz, 1.15 + FOOT.r) < 1.15 + FOOT.r) continue;
+    const g = field.groundAt(x, z, h.y, FOOT.step);
+    if (h.y - g > 0.8 && field.terrain.levelAt(x, z) - g < FOOT.swimAt) continue;
+    out.x = x; out.z = z; return out;
   }
   out.x = h.x; out.z = h.z;
   return out;

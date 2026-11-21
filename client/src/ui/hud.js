@@ -97,7 +97,7 @@ export function createHud(store) {
     const list = [];
     if (h) {
       const d = Math.hypot(h.x - a.f.x, h.z - a.f.z);
-      if (a.riding) { list.push(['E', 'Dismount']); list.push(['Shift', h.winded ? 'Winded' : 'Gallop']); list.push(['Z', intent.walk ? 'Canter' : 'Trot']); }
+      if (a.riding) { list.push(['E', 'Dismount']); list.push(['Shift', h.winded ? 'Winded' : 'Gallop']); list.push(['Space', 'Jump']); list.push(['Z', intent.walk ? 'Canter' : 'Trot']); }
       else if (horseNear(h, a.f) && Math.abs(h.sp) < HORSE.mountSpeed) list.push(['E', 'Mount']);
       else if (h.mode === 1) list.push(['', 'Your horse is coming']);
       if (!a.riding && d > HORSE.reach + 1 && h.mode !== 1) list.push(['H', a.whT > 0 ? 'Whistle' : d > 120 ? `Whistle for your horse · ${Math.round(d)} m` : 'Whistle for your horse']);

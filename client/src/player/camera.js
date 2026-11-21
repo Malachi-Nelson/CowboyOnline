@@ -20,9 +20,9 @@ export function createCamera(field) {
     pivot.x += (x - pivot.x) * k; pivot.z += (z - pivot.z) * k; pivot.y += (y + head - pivot.y) * (ready ? 1 - Math.exp(-dt / 0.12) : 1);
     ready = true;
     // how fast, as a share of a sprint on foot or of a gallop in the saddle
-    const run = ride > 0.5 ? Math.min(1, Math.max(0, (speed - 4) / 9)) : Math.min(1, Math.max(0, (speed - 3.6) / 2.9)), e = 1 - Math.exp(-dt / 0.45);
+    const run = ride > 0.5 ? Math.min(1, Math.max(0, (speed - 4) / 13)) : Math.min(1, Math.max(0, (speed - 3.6) / 2.9)), e = 1 - Math.exp(-dt / 0.45);
     const base = DIST + (RIDE_DIST - DIST) * ride;
-    dist += (base * (1 + tall * 0.3) + run * (0.7 + ride * 1.6) - dist) * e; fov += (FOV + tall * 22 + run * (5 + ride * 5) - fov) * e;
+    dist += (base * (1 + tall * 0.3) + run * (0.7 + ride * 1.6) - dist) * e; fov += (FOV + tall * 22 + run * (5 + ride * 7) - fov) * e;
     const sy = Math.sin(yaw), cy = Math.cos(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
     // forward is (-sin yaw, -cos yaw); the camera sits behind and to the right
     let d = dist;

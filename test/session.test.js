@@ -117,10 +117,10 @@ test('a rider is drawn on their horse, at a gallop, to within a hand; and beside
     assert.equal(e.x, he.x); assert.equal(e.z, he.z);
     if (pa.a.h.sp > top) top = pa.a.h.sp;
   }
-  assert.ok(n > 120 && top > 12.9, `galloped (${top.toFixed(1)} m/s)`);
+  assert.ok(n > 120 && top > 16.9, `galloped (${top.toFixed(1)} m/s)`);
   assert.ok(worst < 0.3, `the horse was drawn within ${(worst * 100).toFixed(0)} cm of where it was`);
-  // rein in and step down: Ada is drawn beside the horse at once, not sliding there from where she mounted
-  phase = 2; r.run(4000); press = 2; r.run(120); b.frame(r.clock.t);
+  // let the horse come to a stand and step down: Ada is drawn beside it at once, not sliding there from where she mounted
+  phase = 2; r.run(6500); press = 2; for (let i = 0; i < 60 && pa.a.riding; i++) r.run(10); b.frame(r.clock.t);
   assert.equal(pa.a.riding, 0); let far = 0;
   // until the news reaches Boone she is still on the horse; after it she is beside it. Never anywhere else.
   for (let i = 0; i < 30; i++) { r.run(16); b.frame(r.clock.t); const d = Math.hypot(e.x - pa.s.x, e.z - pa.s.z); if (d > far) far = d; }

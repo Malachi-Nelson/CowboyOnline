@@ -35,7 +35,7 @@ await page.waitForFunction(() => globalThis.__ct && __ct.session && __ct.session
 const shot = async name => { await page.screenshot({ path: resolve(OUT, `${tag}-${name}.png`) }); console.log('  saved', `${tag}-${name}.png`); };
 const scenery = on => page.evaluate(on => { __ct.view.scene.visible = on; }, on);
 const wait = ms => page.waitForTimeout(ms);
-const state = () => page.evaluate(() => { const s = __ct.session, a = s.a, h = a.h; return { riding: a.riding, horse: Math.round(Math.hypot(h.x - a.f.x, h.z - a.f.z) * 10) / 10, mode: h.mode, sp: Math.round(h.sp * 10) / 10, stam: Math.round(h.stam * 100) / 100, x: Math.round(a.f.x), z: Math.round(a.f.z), corrections: s.stats.corrections, errMaxMm: s.stats.errMax * 1000 }; });
+const state = () => page.evaluate(() => { const s = __ct.session, a = s.a, h = a.h; return { riding: a.riding, horse: Math.round(Math.hypot(h.x - a.f.x, h.z - a.f.z) * 10) / 10, mode: h.mode, sp: Math.round(h.sp * 10) / 10, stam: Math.round(h.stam * 100) / 100, x: Math.round(a.f.x), z: Math.round(a.f.z), dy: Math.round((a.f.y - h.y) * 100) / 100, use: a.useHeld, corrections: s.stats.corrections, errMaxMm: s.stats.errMax * 1000 }; });
 const info0 = await page.evaluate(() => ({ buildMs: __ct.world.ms, threaded: __ct.local ? __ct.local.threaded : null }));
 let touch = null;
 if (phone) { const cdp = await ctx.newCDPSession(page); touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts }); }
@@ -64,6 +64,9 @@ if (phone) {
   await page.evaluate(() => { __ct.controls.intent.yaw = -Math.PI / 2; });                     // look east, down the street to the bridge
   await page.keyboard.press('KeyL');                                                           // 150 ms of ping
   await page.keyboard.down('KeyW'); await page.keyboard.down('ShiftLeft'); await wait(4500); log.push(['galloping, 150 ms ping', await state()]);
+  // a jump at full gallop: how high the horse got, and for how many frames it was off the ground
+  const airborne = page.evaluate(() => new Promise(done => { const a = __ct.session.a, y0 = a.h.y, t0 = performance.now(); let top = 0, frames = 0; const f = () => { if (!a.h.ground) frames++; top = Math.max(top, a.h.y - y0); if (performance.now() - t0 < 1000) requestAnimationFrame(f); else done({ top: Math.round(top * 100) / 100, frames, sp: Math.round(a.h.sp * 10) / 10 }); }; requestAnimationFrame(f); }));
+  await press('Space', 100); log.push(['jumped', await airborne]);
   await page.mouse.move(640, 360); await page.mouse.down(); await page.mouse.move(628, 362, { steps: 6 }); await page.mouse.up();
   await wait(2000); await page.keyboard.up('ShiftLeft'); await page.keyboard.up('KeyW');
   await page.keyboard.down('KeyS'); await wait(3500); await page.keyboard.up('KeyS'); log.push(['reined in', await state()]);
@@ -97,6 +100,12 @@ if (tour) {
   // you and your horse, up close; then the same street at dusk, at night, and in the rain
   await page.evaluate(() => { const s = __ct.session, h = s.horse, a = Math.atan2(-Math.sin(h.yaw), -Math.cos(h.yaw)); __ct.photo([h.x + Math.cos(h.yaw) * 4.2 + Math.sin(h.yaw) * 2.2, h.y + 2.3, h.z - Math.sin(h.yaw) * 4.2 + Math.cos(h.yaw) * 2.2, h.x, h.y + 1.3, h.z]); void a; });
   await wait(5000); await shot('tour-closeup');
+  // a jump at a canter, from the side, held at the top
+  await page.evaluate(() => __ct.photo(s => { const h = s.horse, sx = Math.cos(h.yaw), sz = -Math.sin(h.yaw); return [h.x + sx * 7.5 + Math.sin(h.yaw) * 1.5, h.y + 1.9, h.z + sz * 7.5 + Math.cos(h.yaw) * 1.5, h.x, h.y + 1.3, h.z]; }));
+  await page.keyboard.down('KeyW'); await wait(3500);
+  await page.evaluate(() => __ct.hold(s => s.a.h && !s.a.h.ground && s.a.h.vy < 3.5));
+  await press('Space'); await page.waitForFunction(() => __ct.holding, null, { timeout: 20000 }).catch(() => console.log('  no jump to picture'));
+  await shot('tour-jump'); await page.evaluate(() => __ct.hold(null)); await page.keyboard.up('KeyW');
   const st = [1940, (await page.evaluate(() => __ct.session.field.base)) + 2.4, 2051, 2040, (await page.evaluate(() => __ct.session.field.base)) + 4.5, 2045];
   for (const [name, o] of [['dusk', { hour: 18.4 }], ['night', { hour: 22 }], ['rain', { hour: 11, weather: { cloud: 1, rain: 1, snow: 0, mist: 0.6 } }]]) {
     await page.evaluate(([p, o]) => { __ct.photo(p); __ct.force(o); }, [st, o]); await wait(5500); await shot('tour-' + name);
@@ -106,8 +115,9 @@ if (tour) {
 console.log(tag, JSON.stringify({ ...r, ...info0, ...info }), errors.length ? '\nERRORS:\n' + errors.join('\n') : '\nno page errors');
 await browser.close();
 const L = Object.fromEntries(log);
-const came = L.whistled && L.whistled.horse < 3, mounted = L.mounted && L.mounted.riding === 1, rode = phone ? L.galloped && L.galloped.sp > 5 : L['galloping, 150 ms ping'] && L['galloping, 150 ms ping'].sp > 9;
+const came = L.whistled && L.whistled.horse < 3, mounted = L.mounted && L.mounted.riding === 1, rode = phone ? L.galloped && L.galloped.sp > 5 : L['galloping, 150 ms ping'] && L['galloping, 150 ms ping'].sp > 15;
 const down = phone || (L['stepped down'] && L['stepped down'].riding === 0 && L['back up'].riding === 1);
-const bad = errors.length || r.state !== 'playing' || r.mode !== 'play' || r.others < 5 || !came || !mounted || !rode || !down || r.errMaxMm > 0 || r.corrections > 0 || (!url && !phone && r.addedPing !== 150);
-if (bad) console.log('CHECK FAILED', JSON.stringify({ came, mounted, rode, down }));
+const leapt = phone || (L.jumped && L.jumped.top > 0.8 && L.jumped.frames > 10);
+const bad = errors.length || r.state !== 'playing' || r.mode !== 'play' || r.others < 5 || !came || !mounted || !rode || !down || !leapt || r.errMaxMm > 0 || r.corrections > 0 || (!url && !phone && r.addedPing !== 150);
+if (bad) console.log('CHECK FAILED', JSON.stringify({ came, mounted, rode, down, leapt }));
 process.exit(bad ? 1 : 0);

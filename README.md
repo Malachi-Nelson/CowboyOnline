@@ -25,9 +25,10 @@ The pictures in `docs/screenshots/` come from a headless browser that draws in s
   Everything is made from one seed by plain arithmetic, so the browser and the server build the same world.
 - **Your horse.** It stands beside you when you arrive. **H** whistles: it comes at a run, and if it is too far off
   to run all the way it is brought in behind you, out of sight, and runs the rest. **E** mounts and dismounts.
-  It walks, trots, canters and gallops, takes about four seconds to reach a gallop and two and a half to pull up,
-  turns wider the faster it goes, will not climb a cliff, swims rivers, and is winded after half a minute of
-  galloping.
+  It walks, trots, canters and gallops (17 m/s flat out, about 60 km/h), takes about four seconds to reach a
+  gallop and two and a half to pull up, turns wider the faster it goes, will not climb a cliff, swims rivers, and
+  is winded after half a minute of galloping. **Space** jumps: from a canter or a gallop it clears a fence, a
+  hitching rail or a trough if you take off in the right place.
 - **A lived-in world.** Townsfolk walk the streets; riders travel the roads, stop at the end of them, stretch their
   legs, whistle their horses back and ride on. A day lasts 48 minutes, windows light up after dark, and the weather
   comes and goes: rain on the plains, snow in the high country, mist in the Mirewood.

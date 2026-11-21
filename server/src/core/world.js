@@ -289,7 +289,7 @@ export class World {
       if (e.kind === KIND_HORSE) {
         const sp = s.sp < 0 ? -s.sp : s.sp;
         qx = qPos(s.x); qy = qY(s.y); qz = qPos(s.z); qyaw = qYaw(e.yaw = yawOf(s.hx, s.hz));
-        st = (s.ground ? ST_GROUND : 0) | (sp > 9.5 ? ST_SPRINT : 0) | (sp > 0.3 ? ST_MOVE : 0);
+        st = (s.ground ? ST_GROUND : 0) | (sp > HORSE.canter + 1.5 ? ST_SPRINT : 0) | (sp > 0.3 ? ST_MOVE : 0);
       } else {
         const a = e.a;
         if (a.riding) st = ST_RIDING | ST_GROUND;                 // in the saddle: drawn on the horse, so nothing of their own to send
