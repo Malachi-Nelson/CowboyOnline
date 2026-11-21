@@ -24,6 +24,8 @@ import { Session } from '../../client/src/net/session.js';
 import { WsTransport, LagTransport } from '../../client/src/net/transport.js';
 import { rng32, yawOf, TAU } from '../../shared/math.js';
 import { BTN } from '../../shared/sim/moveFoot.js';
+import { AIM, WEAPON_SHIFT } from '../../shared/sim/guns.js';
+import { GR_DEAD, ST_RIDING } from '../../shared/constants.js';
 import { HUB_X, HUB_Z, TICK_MS, WORLD_SIZE, BAND_NEAR, BAND_MID, KIND_HORSE } from '../../shared/constants.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -36,6 +38,7 @@ const SCENARIOS = {
   street: { spawn: 'hub', roam: 30, text: 'everyone and their horses within 30 m of one spot on the main street: the worst case for bandwidth' },
   town: { spawn: 'hub', roam: 200, text: "everyone in and around Calder's Landing: a busy town" },
   spread: { spawn: 'spread', roam: 0, text: 'everyone scattered over the whole map: the usual case' },
+  gunfight: { spawn: 'hub', roam: 60, combat: true, pick: 'street', lawmen: 4, text: 'everyone in the middle of town with a gun out, shooting at whoever is nearest every few seconds, with the sheriff and his deputies (and any posse) after them: the worst case for combat' },
 };
 const wanted = SOAK ? [opt('scenario', 'town')] : opt('scenario', 'all') === 'all' ? Object.keys(SCENARIOS) : [opt('scenario')];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -45,18 +48,39 @@ const r1 = v => Math.round(v * 10) / 10, r3 = v => Math.round(v * 1000) / 1000;
 // Someone who keeps moving. They pick a spot, head there at a walk, jog or sprint, sometimes strafing or jumping,
 // pause now and then, pick another. Two in three are riders: they whistle for their horse, get on when it arrives,
 // ride at a trot, a canter or a gallop, and now and then step down and walk for a while.
-function brain(rand, pick, rider) {
+// In a gunfight, each has a gun out (a revolver or a repeater) and every few seconds aims at whoever is nearest, as
+// their own screen shows them, holds the aim a moment and fires.
+function brain(rand, pick, rider, combat = false) {
   let tx = 0, tz = 0, has = false, wait = rand() * 1.5, pace = 0, strafe = 0, left = 0, lx = 0, lz = 0, slow = 0, n = 0;
   let afoot = rider ? 0 : 1e9, call = 0, press = 0;              // afoot: steps left before wanting the horse again
+  const gun = combat ? (rand() < 0.6 ? 1 : 2) << WEAPON_SHIFT : 0; let aimFor = 0, quiet = 60 * (1 + rand() * 3), mark = null;
+  const shoot = (c, s) => {                                      // returns true while it has the gun up
+    if (aimFor > 0) {
+      const e = mark && s.ents.get(mark), a = s.a;
+      if (!e || (e.gear & GR_DEAD) || a.dead) { aimFor = 0; return false; }
+      const sh = a.riding ? AIM.rideShoulder : AIM.shoulder, hd = (a.riding ? AIM.rideHead : AIM.head) + AIM.up, ty = e.y + ((e.st & ST_RIDING) ? 2.0 : 1.15);
+      let yaw = c.yaw / 65536 * TAU, pitch = 0;
+      for (let k = 0; k < 2; k++) { const ox = a.f.x + Math.cos(yaw) * sh, oy = a.f.y + hd, oz = a.f.z - Math.sin(yaw) * sh, dx = e.x - ox, dz = e.z - oz; yaw = Math.atan2(-dx, -dz); pitch = Math.atan2(ty - oy, Math.hypot(dx, dz)); }
+      c.yaw = Math.round((((yaw % TAU) + TAU) % TAU) / TAU * 65536) & 65535; c.pitch = Math.round(pitch / TAU * 65536);
+      c.buttons |= BTN.AIM; if (--aimFor === 0) { c.buttons |= BTN.FIRE; quiet = 60 * (1.5 + rand() * 3); }
+      return true;
+    }
+    if (--quiet > 0) return false;
+    let best = null, bd = 60 * 60;
+    for (const e of s.ents.values()) { if (e.kind === KIND_HORSE || (e.gear & GR_DEAD)) continue; const d = (e.x - s.x) ** 2 + (e.z - s.z) ** 2; if (d < bd) { bd = d; best = e; } }
+    if (best) { mark = best.id; aimFor = 30 + (rand() * 20 | 0); } else quiet = 60;
+    return false;
+  };
   return (c, s) => {
-    const a = s.a, m = a.f, h = a.h; c.mx = 0; c.mz = 0; c.buttons = 0;
+    const a = s.a, m = a.f, h = a.h; c.mx = 0; c.mz = 0; c.buttons = gun;
     if (press) { press = 0; return; }                            // let go of the key, so the next press counts
+    if (combat && a.slot && shoot(c, s)) return;
     if (h && !a.riding && --afoot <= 0) {                        // wants to ride: call the horse, get on when it is here
       const dx = h.x - m.x, dz = h.z - m.z;
-      if (dx * dx + dz * dz < 6.2 && Math.abs(h.sp) < 3.4) { c.buttons = BTN.USE; press = 1; has = false; return; }
-      if (--call <= 0) { c.buttons = BTN.WHISTLE; press = 1; call = 60 * 6; return; }
+      if (dx * dx + dz * dz < 6.2 && Math.abs(h.sp) < 3.4) { c.buttons = gun | BTN.USE; press = 1; has = false; return; }
+      if (--call <= 0) { c.buttons = gun | BTN.WHISTLE; press = 1; call = 60 * 6; return; }
     }
-    if (a.riding && rand() < 1 / (60 * 45)) { c.buttons = BTN.USE; press = 1; afoot = 60 * (6 + rand() * 12); has = false; return; }
+    if (a.riding && rand() < 1 / (60 * 45)) { c.buttons = gun | BTN.USE; press = 1; afoot = 60 * (6 + rand() * 12); has = false; return; }
     if (wait > 0) { wait -= 1 / 60; return; }
     if (++n % 60 === 0) { slow = Math.hypot(m.x - lx, m.z - lz) < 0.5 ? slow + 1 : 0; lx = m.x; lz = m.z; }
     const dx = tx - m.x, dz = tz - m.z;
@@ -67,7 +91,7 @@ function brain(rand, pick, rider) {
       return;
     }
     c.yaw = Math.round((((yawOf(dx, dz) % TAU) + TAU) % TAU) / TAU * 65536) & 65535;
-    c.mz = 127; c.mx = a.riding ? 0 : strafe; c.buttons = pace | (!a.riding && rand() < 0.004 ? BTN.JUMP : 0);
+    c.mz = 127; c.mx = a.riding ? 0 : strafe; c.buttons = gun | pace | (!a.riding && rand() < 0.004 ? BTN.JUMP : 0);
   };
 }
 const clampW = v => Math.min(WORLD_SIZE - 40, Math.max(40, v));
@@ -90,23 +114,23 @@ const PICK = {
   },
 };
 
-async function startServer(spawnMode, roam) {
+async function startServer(spawnMode, roam, lawmen = 0) {
   if (URL_) return { url: URL_, http: URL_.replace(/^ws/, 'http'), stop() {} };
-  const child = spawn(process.execPath, [...(flag('gc-at-end') ? ['--expose-gc'] : []), resolve(ROOT, 'server/src/node/main.js')], { env: { ...process.env, PORT: String(PORT), BOTS: String(BOTS), MAX_PLAYERS: String(MAXP), SPAWN: spawnMode, ROAM: String(roam), ALLOW_RESET: '1' }, stdio: ['ignore', 'ignore', 'inherit'] });
+  const child = spawn(process.execPath, [...(flag('gc-at-end') ? ['--expose-gc'] : []), resolve(ROOT, 'server/src/node/main.js')], { env: { ...process.env, PORT: String(PORT), BOTS: String(BOTS), MAX_PLAYERS: String(MAXP), SPAWN: spawnMode, ROAM: String(roam), LAWMEN: String(lawmen), ALLOW_RESET: '1' }, stdio: ['ignore', 'ignore', 'inherit'] });
   const http = `http://127.0.0.1:${PORT}`;
   for (let i = 0; i < 100; i++) { try { if ((await fetch(http + '/health')).ok) break; } catch (e) { /* not up yet */ } await sleep(50); }
   return { url: `ws://127.0.0.1:${PORT}`, http, stop: () => new Promise(r => { child.once('exit', r); child.kill('SIGTERM'); }) };
 }
 
 async function scenario(name, seconds, soak) {
-  const sc = SCENARIOS[name], server = await startServer(sc.spawn, sc.roam), rand = rng32(1899 + name.length);
+  const sc = SCENARIOS[name], server = await startServer(sc.spawn, sc.roam, sc.lawmen || 0), rand = rng32(1899 + name.length);
   const status = async () => (await fetch(server.http + '/status')).json();
   console.log(`\n== ${name}: ${sc.text}\n   ${N} players${BOTS ? ' and ' + BOTS + ' bots' : ''}, ${PING} ms ping (${PING / 2} ms each way, plus up to ${JITTER} ms of jitter), ${seconds} s`);
 
   // ---- connect everyone over two seconds
-  const sessions = [], byId = new Map(), TRUTH = 4096;
+  const sessions = [], byId = new Map(), TRUTH = 4096, PUT_BEFORE = 2, PUT_AFTER = 14;   // ticks
   for (let i = 0; i < N; i++) {
-    const s = new Session(new LagTransport(new WsTransport(server.url), PING / 2, JITTER, rng32(77 + i)), { name: 'load-' + (i + 1), sample: brain(rng32(1000 + i), PICK[name], i % 3 !== 0) });
+    const s = new Session(new LagTransport(new WsTransport(server.url), PING / 2, JITTER, rng32(77 + i)), { name: 'load-' + (i + 1), sample: brain(rng32(1000 + i), PICK[sc.pick || name], i % 3 !== 0, !!sc.combat) });
     s.truth = new Float32Array(TRUTH * 3); s.truthH = new Float32Array(TRUTH * 2); s.truthTick = new Int32Array(TRUTH).fill(-1);
     s.onself = (tick, ack, x, y, z) => { const k = tick % TRUTH, h = s.srv.h; s.truthTick[k] = tick; s.truth[k * 3] = x; s.truth[k * 3 + 1] = y; s.truth[k * 3 + 2] = z; if (h) { s.truthH[k * 2] = h.x; s.truthH[k * 2 + 1] = h.z; } };
     s.onwelcome = o => { s.home = sc.spawn === 'spread' ? { x: o.x, z: o.z } : { x: HUB_X, z: HUB_Z }; byId.set(o.id, [s, false]); if (o.horseId) byId.set(o.horseId, [s, true]); };
@@ -129,8 +153,12 @@ async function scenario(name, seconds, soak) {
     const rec = byId.get(id); if (!rec) return null;
     const s = rec[0], tk = t / TICK_MS, a = Math.floor(tk), f = tk - a, i = a % TRUTH, j = (a + 1) % TRUTH;
     if (s.truthTick[i] !== a || s.truthTick[j] !== a + 1) return null;
-    if (rec[1]) { const q = s.truthH; if (Math.hypot(q[j * 2] - q[i * 2], q[j * 2 + 1] - q[i * 2 + 1]) > 5) return null; return [q[i * 2] + (q[j * 2] - q[i * 2]) * f, q[i * 2 + 1] + (q[j * 2 + 1] - q[i * 2 + 1]) * f]; }   // a horse brought in by a whistle has no "between"
-    const p = s.truth; return [p[i * 3] + (p[j * 3] - p[i * 3]) * f, p[i * 3 + 2] + (p[j * 3 + 2] - p[i * 3 + 2]) * f];
+    // Something put somewhere (getting up again, the cell, out of the saddle, a horse brought in by a whistle) has no
+    // "between", and a viewer shows it at its new place as soon as it hears: leave out the moments around it.
+    // Nothing on legs or hooves covers a metre in a tick (a gallop is 0.85).
+    const q = rec[1] ? s.truthH : s.truth, w = rec[1] ? 2 : 3;
+    for (let k = a - PUT_BEFORE; k < a + PUT_AFTER; k++) { const u = k % TRUTH, v = (k + 1) % TRUTH; if (s.truthTick[u] === k && s.truthTick[v] === k + 1 && Math.hypot(q[v * w] - q[u * w], q[v * w + w - 1] - q[u * w + w - 1]) > 1) return null; }
+    return [q[i * w] + (q[j * w] - q[i * w]) * f, q[i * w + w - 1] + (q[j * w + w - 1] - q[i * w + w - 1]) * f];
   };
   let lastSecond = t0;
   const every = setInterval(() => {
@@ -168,8 +196,9 @@ async function scenario(name, seconds, soak) {
   const ve = k => { const a = viewErr[k].sort((p, q) => p - q); return { n: a.length, p50cm: r1(pct(a, 0.5) * 100), p99cm: r1(pct(a, 0.99) * 100), maxCm: r1((a.at(-1) || 0) * 100) }; };
   const cpu = URL_ ? null : (last.process.cpuMs - first.process.cpuMs) / (cpuWall * 10), stillPlaying = sessions.filter(s => s.state === 'playing').length;
   const afterWarm = series.filter(p => p.t >= Math.min(300, seconds / 3)), rssGrow = afterWarm.length > 1 ? afterWarm.at(-1).rssMB - afterWarm[0].rssMB : 0, heapGrow = afterWarm.length > 1 ? afterWarm.at(-1).heapMB - afterWarm[0].heapMB : 0;
+  const combat = last.combat || { shots: 0, hits: 0, kills: 0 };
   const res = {
-    scenario: name, about: sc.text, players: N, bots: BOTS, playing: stillPlaying, seconds: Math.round(wall), pingMs: PING, jitterMs: JITTER, measuredPingMs: Math.round(rtt / sessions.length),
+    scenario: name, about: sc.text, combat: sc.combat ? { shots: combat.shots, hits: combat.hits, kills: combat.kills, rewoundMsMax: Math.round(combat.rewindMsMax || 0), rewoundMsAvg: combat.shots ? Math.round(combat.rewindMsSum / combat.shots) : 0, clamped: combat.clamped, eventsSent: last.totals.eventsSent, eventsDropped: last.totals.eventsDropped, law: last.law } : undefined, players: N, bots: BOTS, playing: stillPlaying, seconds: Math.round(wall), pingMs: PING, jitterMs: JITTER, measuredPingMs: Math.round(rtt / sessions.length),
     server: { tickMs: last.tickMs, cpuPercentOfOneCore: cpu === null ? null : r1(cpu), cpuPercentPerPlayer: cpu === null ? null : r3(cpu / N), rssMB: last.process.rssMB, heapMB: last.process.heapMB, rssGrowthMB: r1(rssGrow), heapGrowthMB: r1(heapGrow), biggestSnapshotBytes: last.totals.biggestSnapshot, snapshotsSkipped: last.totals.snapshotsSkipped, inputsDropped: last.totals.inputsDropped, viewDelayMs: last.viewDelayMs },
     perPlayer: {
       downBytesPerS: { avg: Math.round(down.reduce((a, b) => a + b, 0) / N), max: Math.round(down.at(-1)), peakSecond: Math.max(...sessions.map(s => s.peakIn)), peakSecondCountedByServer: last.bytesPerSecond.outPeak },
@@ -187,13 +216,18 @@ async function scenario(name, seconds, soak) {
     // shown too, but their one-second timer drifts when the test machine is busy.
     ['no player sent more than 16 KB in a second', last.bytesPerSecond.outPeak <= 16384, `${last.bytesPerSecond.outPeak} bytes by the server's count, ${res.perPlayer.downBytesPerS.peakSecond} by the players'`],
     ['no player sends more than 2 KB a second', last.bytesPerSecond.inPeak <= 2048, `${last.bytesPerSecond.inPeak} bytes by the server's count, ${res.perPlayer.upBytesPerS.peakSecond} by the players'`],
-    ['prediction within 10 cm', errMax < 0.1, `largest ${res.prediction.maxMm} mm over ${errs.length} snapshots`],
+    // in a gunfight people are killed and stood up again elsewhere, which no client can predict; there the gate is
+    // the share of snapshots that needed no correction at all
+    sc.combat ? ['prediction exact in 99.5% of snapshots (deaths and respawns are not predictable)', hist[0] >= 0.995 * errs.length, `${r3(hist[0] / (errs.length || 1) * 100)}% exact; ${corrections} corrections; ${combat.kills} killed`]
+      : ['prediction within 10 cm', errMax < 0.1, `largest ${res.prediction.maxMm} mm over ${errs.length} snapshots`],
     ['everyone stayed connected', stillPlaying === N, `${stillPlaying} of ${N}`],
     ['no update for an unknown entity', unknown === 0, String(unknown)],
   ];
   if (soak) gates.push(['memory flat over the soak', rssGrow <= 20 && heapGrow <= 10, `rss ${rssGrow >= 0 ? '+' : ''}${r1(rssGrow)} MB, heap ${heapGrow >= 0 ? '+' : ''}${r1(heapGrow)} MB after the first ${Math.min(300, Math.round(seconds / 3))} s`]);
   res.gates = gates.map(([what, ok, got]) => ({ what, ok, got }));
 
+  if (sc.combat) console.log(`   combat   ${combat.shots} shots, ${combat.hits} hits, ${combat.kills} killed; rewound ${res.combat.rewoundMsAvg} ms on average, ${res.combat.rewoundMsMax} ms at most (${combat.clamped} cut back); ${last.totals.eventsSent} events sent, ${last.totals.eventsDropped} dropped`);
+  if (sc.combat && last.law) { const L = last.law; console.log(`   law      ${L.crimes} crimes: ${L.seenByLaw} seen by a lawman, ${L.reported} reported by a witness, ${L.unseen} unseen; ${L.posses} posses sent (${L.posseRiding} riding at the end); ${L.arrests} arrests, ${L.jailed} jailed, ${L.escapes} got away`); }
   console.log(`   server   tick p50 ${last.tickMs.p50} ms, p99 ${last.tickMs.p99} ms, max ${last.tickMs.max} ms` + (cpu === null ? '' : `; ${r1(cpu)}% of one core (${r3(cpu / N)}% a player); rss ${last.process.rssMB} MB`));
   console.log(`   down     avg ${res.perPlayer.downBytesPerS.avg} B/s, busiest player ${res.perPlayer.downBytesPerS.max} B/s, worst second ${res.perPlayer.downBytesPerS.peakSecond} B; biggest snapshot ${last.totals.biggestSnapshot} bytes`);
   console.log(`   up       avg ${res.perPlayer.upBytesPerS.avg} B/s, worst second ${res.perPlayer.upBytesPerS.peakSecond} B`);

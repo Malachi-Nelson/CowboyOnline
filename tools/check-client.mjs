@@ -72,6 +72,25 @@ if (phone) {
   await page.keyboard.down('KeyS'); await wait(3500); await page.keyboard.up('KeyS'); log.push(['reined in', await state()]);
   await press('KeyE'); await wait(800); log.push(['stepped down', await state()]);
   await press('KeyE'); await wait(600); log.push(['back up', await state()]);
+  // down again, draw, aim at the nearest townsman as the screen shows him, fire; then Iron Nerve: mark him and fire the mark
+  await press('KeyE'); await wait(700);
+  const sights = () => page.evaluate(() => {
+    const s = __ct.session; let best = null, bd = 1e9;
+    for (const e of s.ents.values()) { if (e.kind !== 1 || e.gear & 32 || e.ef & 2 || e.st & 8) continue; const d = Math.hypot(e.x - s.x, e.z - s.z); if (d > 4 && d < bd) { bd = d; best = e; } }
+    if (!best) return null;
+    const i = __ct.controls.intent; let yaw = i.yaw, pitch = 0;
+    for (let k = 0; k < 4; k++) { const ox = s.a.f.x + Math.cos(yaw) * 0.72, oy = s.a.f.y + 1.7, oz = s.a.f.z - Math.sin(yaw) * 0.72, dx = best.x - ox, dy = best.y + 1.15 - oy, dz = best.z - oz; yaw = Math.atan2(-dx, -dz); pitch = Math.atan2(dy, Math.hypot(dx, dz)); }
+    i.yaw = yaw; i.pitch = pitch; return Math.round(bd);
+  });
+  const fired = () => page.evaluate(() => { const s = __ct.session, a = s.a; return { shots: a.shots, rounds: a.m1, hits: s.stats.hitsMade || 0, nerve: document.documentElement.classList.contains('nerve'), corrections: s.stats.corrections, errMaxMm: s.stats.errMax * 1000 }; });
+  await press('Digit1'); await wait(700);
+  await page.mouse.move(640, 360); await page.mouse.down({ button: 'right' }); await wait(500);
+  await sights(); await wait(80); await page.mouse.down({ button: 'left' }); await wait(60); await page.mouse.up({ button: 'left' }); await wait(1200);
+  log.push(['fired', await fired()]);
+  await press('KeyQ'); await wait(400); await sights(); await wait(60); await page.mouse.down({ button: 'left' }); await wait(60); await page.mouse.up({ button: 'left' }); await wait(300);
+  const marked = await fired(); await press('KeyQ'); await wait(1500);
+  log.push(['iron nerve', { ...(await fired()), during: marked.nerve }]);
+  await page.mouse.up({ button: 'right' }); await press('Digit1'); await wait(500);
 }
 const r = await page.evaluate(() => {
   const s = __ct.session, st = s.stats;
@@ -118,6 +137,7 @@ const L = Object.fromEntries(log);
 const came = L.whistled && L.whistled.horse < 3, mounted = L.mounted && L.mounted.riding === 1, rode = phone ? L.galloped && L.galloped.sp > 5 : L['galloping, 150 ms ping'] && L['galloping, 150 ms ping'].sp > 15;
 const down = phone || (L['stepped down'] && L['stepped down'].riding === 0 && L['back up'].riding === 1);
 const leapt = phone || (L.jumped && L.jumped.top > 0.8 && L.jumped.frames > 10);
-const bad = errors.length || r.state !== 'playing' || r.mode !== 'play' || r.others < 5 || !came || !mounted || !rode || !down || !leapt || r.errMaxMm > 0 || r.corrections > 0 || (!url && !phone && r.addedPing !== 150);
-if (bad) console.log('CHECK FAILED', JSON.stringify({ came, mounted, rode, down, leapt }));
+const fought = phone || (L.fired && L.fired.shots >= 1 && L['iron nerve'] && L['iron nerve'].shots > L.fired.shots && L['iron nerve'].during);
+const bad = errors.length || r.state !== 'playing' || r.mode !== 'play' || r.others < 5 || !came || !mounted || !rode || !down || !leapt || !fought || r.errMaxMm > 0 || r.corrections > 0 || (!url && !phone && r.addedPing !== 150);
+if (bad) console.log('CHECK FAILED', JSON.stringify({ came, mounted, rode, down, leapt, fought }));
 process.exit(bad ? 1 : 0);

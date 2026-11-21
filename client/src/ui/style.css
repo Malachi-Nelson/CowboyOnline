@@ -150,6 +150,7 @@ kbd { font: 600 0.78em/1 var(--text); padding: 0.28em 0.5em; border: 1px solid v
 #guns button { width: 52px; height: 52px; border-radius: 50%; border: 1px solid var(--line); background: var(--plate); font-size: 0.7rem; font-weight: 600; touch-action: none; padding: 0; }
 #guns button.on { border-color: var(--brass); color: var(--brass); }
 #guns .fire { grid-column: span 2; justify-self: end; width: 64px; height: 64px; border-color: rgba(227, 118, 88, 0.6); }
+#guns #tHands { font-size: 0.62rem; line-height: 1.05; }
 
 /* names over other players */
 #tags { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
@@ -204,5 +205,7 @@ details[open] summary { margin-bottom: 8px; }
   #place { top: calc(var(--top) + 9.5rem); }
   #wire dl { font-size: 0.74rem; }
   #hint { bottom: calc(var(--bottom) + 15rem); }
+  /* on a phone the buttons fill the right-hand side: keep the hint to the left of them */
+  .touch #hint { left: var(--gutter-l); transform: none; text-align: left; max-width: calc(100vw - var(--gutter-l) - var(--gutter-r) - 140px); }
 }
 @media (prefers-reduced-motion: reduce) { #hint, #place { transition: none; } }

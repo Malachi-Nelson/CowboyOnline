@@ -208,9 +208,10 @@ export function createFigures(scene, field, maxPeople = 110, maxHorses = 64) {
   const arm = [0, 0, 0, 0];
   function gunArms(slot, aimK, relK, aimP) {
     const up = Math.PI / 2 + aimP;
-    // lowered: revolver at the side, rifle across the body; aimed: both arms out along the line
+    // lowered: revolver at the side, rifle across the body; aimed: the right arm out along the line and the left
+    // reaching in to meet it (under the revolver's grip, or the rifle's fore-end)
     const rx0 = slot === 2 ? 0.55 : 0.2, rz0 = slot === 2 ? 0.1 : -0.06, lx0 = slot === 2 ? 0.95 : 0.1, lz0 = slot === 2 ? -0.62 : 0.06;
-    const rx1 = up, rz1 = slot === 2 ? 0.05 : 0.02, lx1 = up + (slot === 2 ? 0.1 : -0.05), lz1 = slot === 2 ? -0.42 : -0.5;
+    const rx1 = up, rz1 = slot === 2 ? 0.05 : 0.02, lx1 = up + (slot === 2 ? 0.1 : -0.08), lz1 = slot === 2 ? 0.52 : 0.66;
     arm[0] = rx0 + (rx1 - rx0) * aimK; arm[1] = rz0 + (rz1 - rz0) * aimK; arm[2] = lx0 + (lx1 - lx0) * aimK; arm[3] = lz0 + (lz1 - lz0) * aimK;
     if (relK > 0.01) { arm[0] += (0.95 - arm[0]) * relK; arm[1] += (0.25 - arm[1]) * relK; arm[2] += (1.1 - arm[2]) * relK; arm[3] += (-0.75 - arm[3]) * relK; }
   }

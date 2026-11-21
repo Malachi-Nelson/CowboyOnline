@@ -7,8 +7,9 @@ import { TAU } from '../math.js';
 
 export const MSG = { HELLO: 1, WELCOME: 2, INPUT: 3, SNAPSHOT: 4, PING: 5, PONG: 6, REJECT: 7 };
 export const REJECT = { VERSION: 1, FULL: 2, BAD: 3 };
-// update mask bits in a snapshot
-export const UM = { POS: 1, YAW: 2, STATE: 4, GEAR: 8, HOLD: 0x80 };
+// update mask bits in a snapshot. PUT: the server put this body somewhere (getting up again, the cell), so there is
+// no path between where it was and where it is; it carries no bytes of its own
+export const UM = { POS: 1, YAW: 2, STATE: 4, GEAR: 8, PUT: 0x10, HOLD: 0x80 };
 // things that happened, told to everyone who can see them: a shot (who, which way, how far it went and what it
 // struck), a hit (who, where on the body, how hard, from which way), a death, and notes for one player only
 export const EV = { SHOT: 1, HIT: 2, DIE: 3, NOTE: 4 };

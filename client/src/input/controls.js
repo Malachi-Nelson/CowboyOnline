@@ -107,6 +107,7 @@ export function createControls(canvas, store) {
   hold('tFire', v => { if (v) fire(); });
   hold('tReload', v => { if (v) tapped.reload = true; });
   hold('tFocus', v => { if (v) intent.focus = !intent.focus; }, () => intent.focus);
+  hold('tHands', v => { touch.hands = v; if (v) intent.weapon = 0; });
 
   // ---- read once per input step
   function read() {
@@ -126,7 +127,7 @@ export function createControls(canvas, store) {
     intent.aim = p && intent.weapon !== 0 && (aimMouse || touch.aim);
     intent.fire = p && (tapped.fire || keys.has('Mouse0'));
     intent.reload = p && (keys.has('KeyR') || tapped.reload);
-    intent.hands = p && keys.has('KeyX') && intent.weapon === 0;
+    intent.hands = p && (keys.has('KeyX') || touch.hands) && intent.weapon === 0;
     if (!intent.aim) intent.focus = false;                         // Iron Nerve ends when the gun comes down
     tapped.use = tapped.whistle = tapped.jump = tapped.fire = tapped.reload = false;
     intent.active = mx !== 0 || mz !== 0;

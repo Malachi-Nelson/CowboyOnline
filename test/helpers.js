@@ -7,7 +7,7 @@ import { Reader } from '../shared/net/codec.js';
 
 export function rig(worldOpts = {}) {
   const clock = { t: 0 };
-  const world = new World({ bots: 0, ...worldOpts, now: () => clock.t });
+  const world = new World({ bots: 0, lawmen: 0, ...worldOpts, now: () => clock.t });
   const queue = [];                                              // [at, order, fn], delivered in time order
   let order = 0, nextTick = TICK_MS;
   const later = (ms, fn) => { queue.push([clock.t + ms, order++, fn]); };

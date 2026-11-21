@@ -135,6 +135,7 @@ export class Combat {
     a.slot = 0; a.swap = 0; a.rel = 0; a.cool = 0; a.bloom = 0;
     if (a.h && v.horse) {                                       // the horse is waiting nearby
       const h = a.h; h.x = r(x + 2.2); h.z = r(z); h.y = r(T.heightAt(h.x, h.z)); h.sp = 0; h.vy = 0; h.ground = 1; h.mode = 0;
+      W.moved(v.horse);
     }
     W.moved(v);
   }

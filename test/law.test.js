@@ -121,3 +121,16 @@ test('a lawman killed sends a posse: three riders brought in out of sight, ridin
   assert.ok(d1 < d0 - 60, `they closed from ${d0.toFixed(0)} m to ${d1.toFixed(0)} m`);
   assert.ok(notes(A.raw).includes(NOTE.POSSE));
 });
+
+test('a full world keeps its sheriff and deputies, and only a dozen ride in posses at once', () => {
+  const r = rig({ bots: 10, lawmen: 2, maxPlayers: 6 }), f = r.world.field;
+  assert.equal(r.world.bots.length, 6, 'two lawmen and four townsfolk');
+  const P = ['Ada', 'Boone', 'Cora', 'Eli', 'Flora', 'Gus'].map(n => shooter(r, n));
+  assert.equal(r.world.people.length, 6);
+  assert.equal(r.world.bots.length, 2, 'the townsfolk made room for the players'); assert.ok(r.world.bots.every(b => b.role === 'law'), 'but the law stayed');
+  // six men with a price of $50 on them at once: four posses' worth of riders, and no more
+  P.forEach((A, i) => { place(A.p, HUB_X - 300 + i * 120, HUB_Z + 300, f); r.world.moved(A.p); r.world.law.report(A.p, 50, false); });
+  assert.equal(r.world.posse.length, LAW.posseMax, `${r.world.posse.length} riding`);
+  assert.equal(P.filter(A => A.p.law.posse).length, LAW.posseMax / LAW.posseSize, 'four were sent a posse');
+  assert.ok(P.every(A => A.p.law.wanted), 'and every one of them is wanted');
+});

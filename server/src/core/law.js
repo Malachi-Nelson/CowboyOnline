@@ -19,11 +19,12 @@ import { TAU, yawOf } from '../../../shared/math.js';
 
 export const LAW = {
   assault: 5, murder: 15, lawAssault: 10, lawMurder: 35,          // dollars
-  see: 70, hear: 60, witness: 55,                                  // m: how far a lawman sees, a shot carries, a townsman sees
+  see: 70, hear: 120, witness: 55,                                 // m: how far a lawman sees, hears a shot, a townsman sees
+  look: 20 * TICK_RATE,                                            // how long a lawman goes looking where he heard shooting
   report: 10 * TICK_RATE,                                          // a witness on their feet this long has told the law
   escape: 20 * TICK_RATE, giveUp: 75 * TICK_RATE,                  // out of the circle and unseen this long; unseen anywhere
   search0: 60, searchGrow: 3, searchMax: 160,                      // m, m a second, m
-  posseAt: 40, posseSize: 3,                                       // bounty that sends a posse, and how many ride
+  posseAt: 40, posseSize: 3, posseMax: 12,                        // bounty that sends a posse, how many ride, and most riding at once
   selfDefence: 30 * TICK_RATE,                                     // shooting back at someone who shot you is not a crime, for this long
   jailBase: 10, jailPerDollar: 0.5, jailMax: 60,                   // seconds
   arrest: 2.6, arrestTicks: 1.5 * TICK_RATE,                       // how close, and how long, a lawman stands at someone with their hands up
@@ -49,11 +50,13 @@ export class Law {
 
   // ---- what the combat code tells the law
   onShot(e, x, z, r) {
-    // townsfolk near the shot (or where it landed) scatter
+    // townsfolk near the shot (or where it landed) scatter; a lawman in earshot comes to see what it was
+    const law = this.isLaw(e);
     for (const b of this.w.bots) {
-      if (b.e.a.dead || b.role === 'law' || b.role === 'posse') continue;
+      if (b.e.a.dead || b.role === 'posse') continue;
       const s = b.e.s, d1 = (s.x - x) ** 2 + (s.z - z) ** 2, d2 = (s.x - r.x) ** 2 + (s.z - r.z) ** 2;
-      if (d1 < 35 * 35 || d2 < 12 * 12) b.scare(x, z, this.w.tick);
+      if (b.role === 'law') { if (!law && d1 < LAW.hear * LAW.hear) b.hear(x, z, this.w.tick); }
+      else if (d1 < 35 * 35 || d2 < 12 * 12) b.scare(x, z, this.w.tick);
     }
   }
   onHurt(by, v, killed) {
@@ -74,17 +77,20 @@ export class Law {
   crime(p, value, grave, victim) {
     const W = this.w, s = p.s, r = this.record(p); this.stats.crimes++;
     let lawSaw = false, seen = 0, fresh = 0;
+    const saw = this.saw || (this.saw = []); saw.length = 0;
     for (const list of [W.bots, W.posse]) for (const b of list) {
       const e = b.e; if (e.a.dead || e === victim && !this.isLaw(e)) continue;
       const law = b.role === 'law' || b.role === 'posse', range = law ? LAW.see : LAW.witness;
       const dx = e.s.x - s.x, dz = e.s.z - s.z; if (dx * dx + dz * dz > range * range) continue;
       if (!this.sees(e, p)) continue;
       if (law) lawSaw = true;
-      else if (!b.witness) { b.witness = { criminal: p, at: W.tick }; this.witnesses.push(b); seen++; fresh++; }
+      else if (!b.witness) saw.push(b);
       else if (b.witness.criminal === p) seen++;
     }
     // a victim who lives through it tells it too
-    if (victim && victim.bot && !this.killing && !victim.a.dead && !this.isLaw(victim) && !victim.bot.witness) { victim.bot.witness = { criminal: p, at: W.tick }; this.witnesses.push(victim.bot); seen++; fresh++; }
+    if (victim && victim.bot && !this.killing && !victim.a.dead && !this.isLaw(victim) && !victim.bot.witness) saw.push(victim.bot);
+    // if the law saw it there is nobody to run and tell
+    if (!lawSaw) for (const b of saw) { b.witness = { criminal: p, at: W.tick }; this.witnesses.push(b); seen++; fresh++; }
     if (!lawSaw && !seen) { this.stats.unseen++; return; }
     // hurting someone, then killing them, is charged as the killing
     const prev = victim ? r.charged.get(victim.id) || 0 : 0, add = value > prev ? value - prev : 0;
@@ -105,7 +111,7 @@ export class Law {
   }
   escalate(p, level) {
     const r = this.record(p); if (r.wanted < level) r.wanted = level;
-    if (level >= 3 && !r.posse) { r.posse = true; this.stats.posses++; this.sendPosse(p); this.note(p, NOTE.POSSE, 0); }
+    if (level >= 3 && !r.posse && this.sendPosse(p)) { r.posse = true; this.stats.posses++; this.note(p, NOTE.POSSE, 0); }
   }
 
   // ---- can e see p? Eyes to eyes, nothing built in between and the ground not in the way
@@ -179,7 +185,7 @@ export class Law {
     const secs = Math.min(LAW.jailMax, LAW.jailBase + r.bounty * LAW.jailPerDollar);
     this.clear(p); r.bounty = 0; r.pending = 0; r.jailUntil = W.tick + Math.round(secs * TICK_RATE); this.stats.jailed++;
     W.combat.revive(p, J.x, J.z); p.a.jail = 1; p.a.slot = 0; p.a.swap = 0;
-    if (p.a.h) { const h = p.a.h, r2 = Math.fround; h.x = r2(J.door.x + 3); h.z = r2(J.door.z - 2); h.y = r2(W.field.terrain.heightAt(h.x, h.z)); h.sp = 0; h.mode = 0; }
+    if (p.a.h) { const h = p.a.h, r2 = Math.fround; h.x = r2(J.door.x + 3); h.z = r2(J.door.z - 2); h.y = r2(W.field.terrain.heightAt(h.x, h.z)); h.sp = 0; h.mode = 0; if (p.horse) W.moved(p.horse); }
     for (const b of this.witnesses) if (b.witness && b.witness.criminal === p) b.witness = null;
   }
   release(p) {
@@ -188,10 +194,12 @@ export class Law {
     this.note(p, NOTE.RELEASED, 0);
   }
 
-  // ---- the posse: three lawmen on horses, brought in out of sight behind the wanted man, riding him down
+  // ---- the posse: three lawmen on horses, brought in out of sight behind the wanted man, riding him down. There are
+  // only so many to go round: with a dozen already riding, nobody new is sent (those riding take on whoever is
+  // nearest once their own man is dealt with). Returns how many rode out.
   sendPosse(p) {
-    const W = this.w, F = W.field, T = F.terrain, s = p.s;
-    for (let k = 0; k < LAW.posseSize; k++) {
+    const W = this.w, F = W.field, T = F.terrain, s = p.s, n = Math.min(LAW.posseSize, LAW.posseMax - W.posse.length);
+    for (let k = 0; k < n; k++) {
       let x = s.x, z = s.z;
       for (let tries = 0; tries < 12; tries++) {
         const a = W.rand() * TAU, d = 140 + W.rand() * 40; x = s.x + Math.cos(a) * d; z = s.z + Math.sin(a) * d;
@@ -202,6 +210,7 @@ export class Law {
       }
       W.addLawman('posse', x, z, p);
     }
+    return n > 0 ? n : 0;
   }
 }
 
@@ -217,12 +226,14 @@ export class Lawman {
   }
   get witness() { return null; }
   scare() {}
+  // shooting heard: go and look, gun in hand (whoever is still at it when he gets there is seen doing it)
+  hear(x, z, tick) { if (this.role === 'law') this.alarm = { x: x + (this.rand() - 0.5) * 8, z: z + (this.rand() - 0.5) * 8, until: tick + LAW.look }; }
   onHurt(by) { if (by && !by.bot && !this.target) this.target = by; }
   onDeath(tick) { this.deadAt = tick; }
   respawn(tick) {
     const world = this.law.w;
     if (this.role === 'posse') { world.removeLawman(this); return; }
-    const d = this.home; world.combat.revive(this.e, d.x + (this.rand() - 0.5) * 6, d.z - 1 - this.rand() * 3); this.target = null; void tick;
+    const d = this.home; world.combat.revive(this.e, d.x + (this.rand() - 0.5) * 6, d.z - 1 - this.rand() * 3); this.target = null; this.alarm = null; void tick;
   }
   // who to go after: a wanted man the law knows about, nearest first
   pick() {
@@ -296,13 +307,27 @@ export class Lawman {
     if (dx * dx + dz * dz < 0.5) return;
     c.yaw = yaw16(yawOf(dx, dz)); c.mz = rein ? -127 : 127; c.buttons = (c.buttons & ~(BTN.SPRINT | BTN.WALK)) | pace;
   }
+  // up and down the main street, a few paces at a time; or, with shooting heard, to where it was
   patrol(t) {
-    const s = this.e.s, c = this.cmd, r = this.rand, a = this.e.a;
+    const s = this.e.s, c = this.cmd, r = this.rand, a = this.e.a, al = this.alarm;
     if (a.riding) { c.buttons |= BTN.USE; this.pressed = true; return; }
+    if (al) {
+      if (this.law.w.tick > al.until) { this.alarm = null; this.wait = 1; }
+      else {
+        const dx = al.x - s.x, dz = al.z - s.z;
+        c.buttons = WP(this.gun);
+        if (dx * dx + dz * dz > 25) { c.yaw = yaw16(yawOf(dx, dz)); c.mz = 127; c.buttons |= BTN.SPRINT; }
+        else if (r() < 0.02) c.yaw = (c.yaw + ((r() - 0.5) * 24000) | 0) & 65535;   // there: look about
+        return;
+      }
+    }
     if (this.wait > 0) { this.wait -= 1 / TICK_RATE; return; }
     const dx = this.tx - s.x, dz = this.tz - s.z;
     if (dx * dx + dz * dz < 2.5 || t > this.until) {
-      const h = this.home; this.tx = h.x + (r() - 0.5) * 120; this.tz = h.z + (r() - 0.5) * 6; this.until = t + 30; this.wait = 2 + r() * 8; return;
+      const S = this.beat !== undefined ? this.beat : (this.beat = this.field.streets.find(q => q.place === 'hub') || null), h = this.home;
+      if (S) { this.tx = S.x0 + r() * (S.x1 - S.x0); this.tz = S.z0 + 2 + r() * (S.z1 - S.z0 - 4); }
+      else { this.tx = h.x + (r() - 0.5) * 120; this.tz = h.z + (r() - 0.5) * 6; }
+      this.until = t + 45; this.wait = 2 + r() * 8; return;
     }
     c.yaw = yaw16(yawOf(dx, dz)); c.mz = 127; c.buttons = WP(0) | BTN.WALK;
   }

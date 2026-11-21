@@ -71,7 +71,7 @@ test('a connection that floods is closed, and cannot talk its way back in', () =
 
 test('every snapshot fits the budget and the client ends up with exactly what the server thinks it has', () => {
   // the worst case for one player: 63 bots and their horses milling about within 30 m
-  const world = new World({ bots: 63, roam: 30, now: () => 0 });
+  const world = new World({ bots: 63, lawmen: 0, roam: 30, now: () => 0 });
   const a = rawClient(world); a.send(hello());
   const mirror = new Map(); let biggest = 0, updates = 0, holds = 0, horses = 0;
   const h = {

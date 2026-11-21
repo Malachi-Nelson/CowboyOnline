@@ -87,6 +87,8 @@ function connect(url) {
   s.onwhistle = e => sound.whistle(Math.hypot(e.x - s.x, e.z - s.z));
   s.onshot = (a, seq) => ownShot(s, a);
   s.onevent = ev => onEvent(s, ev);
+  let wasJailed = false;
+  s.onstatus = st => { const j = (st.flags & 2) !== 0; if (j && !wasJailed) { controls.intent.weapon = 0; nerve.end(); } wasJailed = j; };   // taken in: the gun goes away and stays away
   s.onclose = reason => {
     if (s !== session) return;
     const why = s.state === 'rejected' ? s.reason : reason || 'The connection closed.';

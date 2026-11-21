@@ -10,7 +10,7 @@
 //   Interpolation. Everyone else is drawn a little in the past, sliding between the positions the server sent.
 import { SIM_DT, TICK_MS, PROTOCOL_VERSION, DAY_MS, KIND_HORSE, ST_RIDING, ST_WHISTLE, GR_DEAD } from '../../../shared/constants.js';
 import { Writer, Reader } from '../../../shared/net/codec.js';
-import { MSG, encHello, encInputHead, encCmd, encHints, encPing, decWelcome, readSnapshot, readSelf, readStatus, makeStatus, dPos, dY, dYaw } from '../../../shared/net/messages.js';
+import { MSG, UM, encHello, encInputHead, encCmd, encHints, encPing, decWelcome, readSnapshot, readSelf, readStatus, makeStatus, dPos, dY, dYaw } from '../../../shared/net/messages.js';
 import { rayPerson, rayHorse } from '../../../shared/world/raycast.js';
 import { PITCH_MAX } from '../../../shared/sim/guns.js';
 import { makeField } from '../../../shared/world/field.js';
@@ -91,16 +91,18 @@ export class Session {
         const e = this.ents.get(id);
         if (!e) { this.stats.unknown++; return; }
         const t = tick * TICK_MS;
-        // put somewhere new (a horse brought in by a whistle), or just out of the saddle: there is no path to draw
-        // between where it was and where it is, so forget the old samples
-        if (dx * dx + dz * dz > JUMP2 || (st >= 0 && (e.st & ST_RIDING) && !(st & ST_RIDING))) { e.reset(); hold = 0; }
-        const before = e.newest;
+        // put somewhere new (by the server, or a horse brought in by a whistle), or just out of the saddle: there is
+        // no path to draw between where it was and where it is, so forget the old samples
+        if ((mask & UM.PUT) || dx * dx + dz * dz > JUMP2 || (st >= 0 && (e.st & ST_RIDING) && !(st & ST_RIDING))) { e.reset(); hold = 0; }
+        const before = e.newest, riding = (e.st & ST_RIDING) !== 0;
         // it stood where it was until `hold` ticks ago: say so, or it would be drawn drifting through its rest
         if (hold) e.push(t - hold * TICK_MS, dPos(e.qx), dY(e.qy), dPos(e.qz), dYaw(e.qyaw), false);
         e.qx += dx; e.qy += dy; e.qz += dz; if (yaw >= 0) e.qyaw = yaw;
         if (st >= 0) { if ((st & ST_WHISTLE) && !(e.st & ST_WHISTLE) && this.onwhistle) this.onwhistle(e); e.st = st; }
         if (gear >= 0) e.gear = gear;
-        if (before > -Infinity) { const gap = t - (hold ? t - hold * TICK_MS : before); e.ival += ((gap > 600 ? 600 : gap) - e.ival) * 0.25; }
+        // how often it is heard of, which sets how far back it is drawn; a rider's own updates (the way they aim, the
+        // gun in hand) are not movement, and they are drawn with their horse
+        if (before > -Infinity && !riding) { const gap = t - (hold ? t - hold * TICK_MS : before); e.ival += ((gap > 600 ? 600 : gap) - e.ival) * 0.25; }
         e.push(t, dPos(e.qx), dY(e.qy), dPos(e.qz), dYaw(e.qyaw), isMoving(e.st));
       },
     };
@@ -270,15 +272,17 @@ export class Session {
     const est = now + this.tOff, slack = this.jit + 10, ease = 1 - Math.exp(-dt / 0.25), st = this.stats;
     this.nearDelay = Math.max(MIN_DELAY, TICK_MS + slack);
     for (const e of this.ents.values()) {
+      if (e.kind !== KIND_HORSE && (e.st & ST_RIDING) && this.horseOf.has(e.id)) continue;   // riders: below, with their horses
       const dx = e.x - this.x, dz = e.z - this.z, want = Math.max(MIN_DELAY, Math.max(intervalFor(Math.sqrt(dx * dx + dz * dz)), e.ival) + slack);
       e.delay = e.delay ? e.delay + (want - e.delay) * ease : want;
       e.sample(est - e.delay);
       st.entFrames++; if (e.late > 0 && isMoving(e.st)) st.lateFrames++;
     }
-    // riders go where their horses are (and keep their own heading as the way they aim)
+    // riders go where their horses are, drawn at the same moment, and keep their own heading as the way they aim
     for (const e of this.ents.values()) {
       if (e.kind === KIND_HORSE || !(e.st & ST_RIDING)) { e.mount = null; e.aimYaw = e.yaw; continue; }
       const h = e.mount = this.horseOf.get(e.id) || null;
+      if (h) { e.delay = h.delay; e.sample(est - e.delay); st.entFrames++; }
       e.aimYaw = e.yaw;
       if (h) { e.x = h.x; e.y = h.y; e.z = h.z; e.yaw = h.yaw; e.vx = h.vx; e.vz = h.vz; }
     }

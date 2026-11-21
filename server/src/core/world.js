@@ -99,7 +99,7 @@ export class World {
     const e = {
       id: this.allocId(), kind, ef, name, nameBytes: utf8.encode(name).length, s, yaw, st: ST_GROUND, gear: 0,
       qx: qPos(s.x), qy: qY(s.y), qz: qPos(s.z), qyaw: qYaw(yaw),
-      cell: -1, gone: false, still: 2, lastChange: this.tick, restAt: this.tick, moveStart: this.tick, hist: new Float32Array(HIST * 5),
+      cell: -1, gone: false, still: 2, lastChange: this.tick, restAt: this.tick, moveStart: this.tick, putAt: -1, hist: new Float32Array(HIST * 5),
       a: null, horse: null, owner: null, bot: null,
       // people only: health, and what the law makes of them (law.js)
       hp: HP_MAX, hurtAt: -1e9, deadAt: 0, killedBy: 0, lastHurtBy: 0, law: null, aimYaw: 0,
@@ -143,6 +143,7 @@ export class World {
     i = this.people.indexOf(e); if (i >= 0) this.people.splice(i, 1);
     for (const c of this.clients) { const rec = c.view.get(e.id); if (rec) { c.view.delete(e.id); if (rec.known) c.gone.push(e.id); } }
     if (e.token) this.tokens.delete(e.token);
+    if (this.law && e.bot) { const L = this.law, i = L.lawmen.indexOf(e.bot), j = L.witnesses.indexOf(e.bot); if (i >= 0) L.lawmen.splice(i, 1); if (j >= 0) L.witnesses.splice(j, 1); }
     this.freeIds.push({ id: e.id, at: this.tick });
     if (e.horse) this.removeEntity(e.horse);
   }
@@ -153,14 +154,16 @@ export class World {
     for (let i = 0; i < 20; i++) { const x = 250 + r() * (WORLD_SIZE - 500), z = 250 + r() * (WORLD_SIZE - 500); if (T.levelAt(x, z) - T.heightAt(x, z) < 0.3) return [x, z]; }
     return [HUB_X, HUB_Z];
   }
-  // keep the world at its bot count, making room as people arrive
+  // keep the world at its bot count, making room as people arrive. The sheriff and his deputies come first and are
+  // the town's own, not stand-ins for players: they stay however full the world gets.
   syncBots() {
-    const want = Math.max(0, Math.min(this.opts.bots, this.opts.maxPlayers - this.people.length)), r = this.rand, f = this.field;
+    const law = this.law ? this.opts.lawmen : 0, r = this.rand, f = this.field;
+    const want = law + Math.max(0, Math.min(this.opts.bots - law, this.opts.maxPlayers - law - this.people.length));
     while (this.bots.length > want) this.removeEntity(this.bots.pop().e);
     while (this.bots.length < want) {
       const n = this.bots.length, name = NAMES[n % NAMES.length] + (n >= NAMES.length ? ' ' + (1 + ((n / NAMES.length) | 0)) : ''), seed = rng32((this.opts.seed + n * 7919 + 13) >>> 0);
       let e, bot;
-      if (this.law && n < this.opts.lawmen && this.opts.spawn !== 'spread' && !(this.opts.roam > 0)) {   // the sheriff and his deputies come first
+      if (n < law) {
         const d = this.field.jail.door; e = this.spawnEntity(n === 0 ? 'Sheriff Garrity' : 'Deputy ' + NAMES[(n * 7) % NAMES.length], true, d.x + (n - 1.5) * 5, d.z - 2, false);
         e.ef |= EF_LAW; bot = new Lawman(e, seed, 'law', f, this.law); this.law.lawmen.push(bot);
       } else if (this.opts.spawn === 'spread') {                         // scattered wanderers, a third of them mounted
@@ -443,7 +446,7 @@ export class World {
       const rec = cand[i]; if (!rec.known || rec.sort < 0) continue;
       if (n === 255 || w.o + UPDATE_MAX > B) break;
       const e = rec.e, dx = e.qx - rec.qx, dy = e.qy - rec.qy, dz = e.qz - rec.qz;
-      let mask = (dx || dy || dz ? UM.POS : 0) | (e.qyaw !== rec.yaw ? UM.YAW : 0) | (e.st !== rec.st ? UM.STATE : 0) | (e.gear !== rec.gear ? UM.GEAR : 0), hold = 0;
+      let mask = (dx || dy || dz ? UM.POS : 0) | (e.qyaw !== rec.yaw ? UM.YAW : 0) | (e.st !== rec.st ? UM.STATE : 0) | (e.gear !== rec.gear ? UM.GEAR : 0) | (e.putAt > rec.sent ? UM.PUT : 0), hold = 0;
       // If this body stood still since before the last thing this player heard about it, say how long ago it set
       // off, so their copy does not start drifting before the real one moved.
       if (rec.sent >= e.restAt && rec.sent < e.moveStart - 1) { hold = Math.min(255, tick - (e.moveStart - 1)); if (hold > 0) mask |= UM.HOLD; }
@@ -471,8 +474,9 @@ export class World {
     else { out.x = h[i] + (h[j] - h[i]) * f; out.y = h[i + 1] + (h[j + 1] - h[i + 1]) * f; out.z = h[i + 2] + (h[j + 2] - h[i + 2]) * f; }
     return out;
   }
-  // a body was put somewhere new by the server (getting up again, jail): nothing to rewind to between here and there
-  moved(e) { const s = e.s, h = e.hist; for (let i = 0; i < HIST; i++) { const o = i * 5; h[o] = s.x; h[o + 1] = s.y; h[o + 2] = s.z; } }
+  // a body was put somewhere new by the server (getting up again, jail): nothing to rewind to between here and there,
+  // and every viewer is told so with its next update
+  moved(e) { const s = e.s, h = e.hist; for (let i = 0; i < HIST; i++) { const o = i * 5; h[o] = s.x; h[o + 1] = s.y; h[o + 2] = s.z; } e.putAt = this.tick; }
   // what a player is told about themselves that only the server decides
   statusOf(p, o) {
     const a = p.a, L = p.law, tick = this.tick;
@@ -499,6 +503,7 @@ export class World {
       tickMs: this.metrics.summary(),
       bytesPerSecond: { outAvg: n ? Math.round(out / n) : 0, outPeak: peak, inAvg: n ? Math.round(inn / n) : 0, inPeak },
       biggestView: view, viewDelayMs: n ? Math.round(delay / n) : 0, totals: this.totals, combat: this.combat.stats,
+      law: this.law ? { ...this.law.stats, lawmen: this.law.lawmen.length, posseRiding: this.posse.length, jailedNow: this.people.filter(p => p.a.jail).length } : null,
     };
   }
 }

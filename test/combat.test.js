@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { rig, aim, shooter, place } from './helpers.js';
 import { Writer, Reader } from '../shared/net/codec.js';
-import { MSG, EV, ZONE, STRUCK, encHello, encInputHead, encCmd, encHints, readSnapshot, readSelf } from '../shared/net/messages.js';
+import { MSG, EV, UM, ZONE, STRUCK, encHello, encInputHead, encCmd, encHints, readSnapshot, readSelf } from '../shared/net/messages.js';
 import { HUB_X, HUB_Z, TICK_MS, REWIND_MAX, HP_MAX, KIND_HORSE } from '../shared/constants.js';
 import { BTN } from '../shared/sim/moveFoot.js';
 import { GUNS, AIM, WEAPON_SHIFT } from '../shared/sim/guns.js';
@@ -147,4 +147,26 @@ test('a player who dies is down six seconds, then up on the street with full hea
   assert.ok(!pb.a.dead && pb.hp === HP_MAX && B.status.hp === HP_MAX, 'up again'); assert.equal(pb.a.m1, GUNS[1].mag); assert.ok(pb.a.r1 >= GUNS[1].spare);
   assert.ok(Math.abs(pb.s.x - HUB_X) <= 23 && Math.abs(pb.s.z - HUB_Z) <= 5, 'on the main street');
   assert.ok(B.stats.corrections - c0 <= 2, `${B.stats.corrections - c0} corrections: being shot dead and being stood up again`);
+});
+
+test('getting up again is a jump, not a slide: everyone watching is told the body was put there', () => {
+  const r = rig(), A = shooter(r, 'Ada'), f = r.world.field;
+  const B = r.join('Boone', 75, { sample: c => { c.buttons = W(0); } }), C = r.join('Cora', 75, { sample: c => { c.buttons = W(0); } });
+  r.run(400); const pb = r.world.people.find(p => p.name === 'Boone'), pc = r.world.people.find(p => p.name === 'Cora');
+  place(A.p, HUB_X - 60, HUB_Z, f); place(pb, HUB_X - 40, HUB_Z, f); place(pc, HUB_X - 30, HUB_Z + 12, f);
+  for (const p of [A.p, pb, pc]) r.world.moved(p);
+  r.run(1000);
+  // he gets up 9 m from where he fell: too near for a viewer to tell a jump from a dash by distance alone
+  const up = [HUB_X - 31, HUB_Z]; r.world.spawnPoint = () => up;
+  A.hold(30); const t = aim(A.p.a, pb.s.x, pb.s.y + 1.63, pb.s.z); A.yaw = t.yaw; A.pitch = t.pitch; A.hold(20); A.fire(); r.run(200);
+  assert.ok(pb.a.dead); const fell = pb.s.x, n0 = A.raw.got.length;
+  const seen = [];
+  for (let i = 0; i < (RESPAWN_TICKS * TICK_MS + 1000) / 16; i++) { r.run(16); const e = C.ents.get(pb.id); if (e) seen.push(e.x); }
+  assert.ok(!pb.a.dead && Math.abs(pb.s.x - up[0]) < 1, 'up again where the world put him');
+  let puts = 0;
+  for (const b of A.raw.got.slice(n0)) if (b[0] === MSG.SNAPSHOT) { const rd = new Reader(b); rd.u8(); readSnapshot(rd, { self: (tk, a, x) => readSelf(x, makeActor(0, 0, 0, true)), despawn() {}, spawn() {}, update: (tk, id, mask) => { if (id === pb.id && (mask & UM.PUT)) puts++; } }); }
+  assert.equal(puts, 1, 'the update that stood him up said he was put there, once');
+  const between = seen.filter(x => x > fell + 1 && x < up[0] - 1);
+  assert.equal(between.length, 0, `Cora never drew him partway (${between.map(x => (x - HUB_X).toFixed(1)).join(', ')})`);
+  assert.ok(seen.some(x => Math.abs(x - fell) < 1) && seen.some(x => Math.abs(x - up[0]) < 1), 'she saw him fall there and get up here');
 });
